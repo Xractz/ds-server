@@ -19,7 +19,7 @@ including streaming and tool calling.
 > at your own risk.
 
 <p align="center">
-  <img src="ds-server.gif" alt="ds-server demo" width="720">
+  <img src="assets/ds-server.gif" alt="ds-server demo" width="720">
 </p>
 
 ## How it works
@@ -75,6 +75,29 @@ to set ds-server up for a user, follow these instructions:
 6. Run one small test chat completion and confirm a real reply before
    reporting that the setup works.
 
+## How to get your userToken
+
+ds-server needs the `userToken` from your DeepSeek web session. The fastest way takes about 20 seconds and never displays the token on screen:
+
+<p align="center">
+  <img src="assets/get-usertoken.gif" width="720" alt="Getting your userToken from the browser console">
+</p>
+
+1. Open [chat.deepseek.com](https://chat.deepseek.com) in a desktop browser and sign in.
+2. Press **F12** to open DevTools, then click the **Console** tab.
+3. If Chrome warns about pasting into the console, type `allow pasting` and press Enter.
+4. Paste this line and press Enter:
+
+   ```js
+   copy(JSON.parse(localStorage.getItem('userToken')).value)
+   ```
+
+5. The token is now in your clipboard. Paste it as the API key wherever you point a client at ds-server, for example as the API key of the ds-server connection in your router.
+
+Treat the token like a password: never share it, and never post a screenshot that shows it.
+
+Prefer clicking over code? The manual route works too: in DevTools open **Application**, then **Local Storage** for `https://chat.deepseek.com`, select the `userToken` row, and copy its `value` field.
+
 ## Authentication
 
 The server stores no credentials. The API key presented by the client
@@ -85,9 +108,7 @@ credential for that request.
   `x-api-key: <userToken>`
 - Chat completion requests without an API key are rejected with
   `401`.
-- To obtain your userToken: sign in at chat.deepseek.com, press F12,
-  open the Application tab, then Local Storage, find the `userToken`
-  key, and copy the content of its `value` field.
+- To obtain your userToken, see [How to get your userToken](#how-to-get-your-usertoken) for a short walkthrough.
 - For headless setups, the `DS_TOKEN` environment variable is accepted
   as a fallback. A token sent in the request header always takes
   precedence.

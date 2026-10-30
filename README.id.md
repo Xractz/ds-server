@@ -20,7 +20,7 @@ calling.
 > perangkat lunak ini sepenuhnya atas risiko sendiri.
 
 <p align="center">
-  <img src="ds-server.gif" alt="Demo ds-server" width="720">
+  <img src="assets/ds-server.gif" alt="Demo ds-server" width="720">
 </p>
 
 ## Cara kerja
@@ -77,6 +77,29 @@ berikut:
 6. Jalankan satu chat completion pengujian kecil dan pastikan ada
    balasan asli sebelum melaporkan bahwa pemasangan berhasil.
 
+## Cara mendapatkan userToken
+
+ds-server membutuhkan `userToken` dari sesi web DeepSeek Anda. Cara tercepatnya sekitar 20 detik dan tokennya tidak pernah tampil di layar:
+
+<p align="center">
+  <img src="assets/get-usertoken.gif" width="720" alt="Cara mendapatkan userToken dari console browser">
+</p>
+
+1. Buka [chat.deepseek.com](https://chat.deepseek.com) di browser desktop dan masuk.
+2. Tekan **F12** untuk membuka DevTools, lalu klik tab **Console**.
+3. Jika Chrome memberi peringatan soal menempel teks di console, ketik `allow pasting` lalu tekan Enter.
+4. Tempel baris ini lalu tekan Enter:
+
+   ```js
+   copy(JSON.parse(localStorage.getItem('userToken')).value)
+   ```
+
+5. Token sekarang ada di clipboard Anda. Tempel sebagai API key di klien yang Anda arahkan ke ds-server, misalnya sebagai API key koneksi ds-server di router Anda.
+
+Perlakukan token seperti kata sandi: jangan dibagikan, dan jangan pernah mengunggah tangkapan layar yang menampilkannya.
+
+Lebih suka klik daripada kode? Cara manual juga bisa: di DevTools buka **Application**, lalu **Local Storage** untuk `https://chat.deepseek.com`, pilih baris `userToken`, dan salin field `value`-nya.
+
 ## Autentikasi
 
 Server tidak menyimpan kredensial apa pun. API key yang dikirim klien
@@ -86,9 +109,7 @@ langsung sebagai kredensial DeepSeek untuk request yang bersangkutan.
 - Header yang diterima: `Authorization: Bearer <userToken>` atau
   `x-api-key: <userToken>`
 - Request chat completions tanpa API key ditolak dengan `401`.
-- Cara mengambil userToken: masuk ke chat.deepseek.com, tekan F12,
-  buka tab Application, lalu Local Storage, cari key `userToken`, dan
-  salin isi field `value`.
+- Cara mengambil userToken: lihat [Cara mendapatkan userToken](#cara-mendapatkan-usertoken) untuk panduan singkatnya.
 - Untuk pemakaian headless, environment variable `DS_TOKEN` diterima
   sebagai cadangan. Token yang dikirim melalui header selalu
   didahulukan.
