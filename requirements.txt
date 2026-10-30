@@ -1,3 +1,4 @@
-requests
-wasmtime
-flask
+# Minimum versions are the ones this release was tested with.
+flask>=3.1
+requests>=2.34
+wasmtime>=50
