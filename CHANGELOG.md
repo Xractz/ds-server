@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Regression fixture corpus under `tests/fixtures` covering the
+  historical parser failure shapes: SSE patch sequences for thinking
+  routed through the -1 fragment selector, fragment lists appended
+  and batched at the response level, transition chunks with no
+  operation plus standalone `[reference:N]` markers, and
+  mixed-dialect tool replies including mojibake-damaged DSML.
+
+### Fixed
+
+- Tool replies with fused dialects no longer leak markup into the
+  visible text: a DSML invoke block closed by a `tool_call` tag (or
+  by its calls wrapper) is now parsed as a call, and any orphaned
+  DSML or `tool_call` tag debris left after extraction is stripped
+  by a final sweep. Long fenced code blocks in tool-carrying
+  replies stay capped at 10 lines plus a trimmed note, while plain
+  replies are untouched; both behaviors are now covered by tests.
+- The stream parser now handles fragment updates that arrive at
+  the response level itself: lists appended with `APPEND` and bare
+  fragment dicts inside `BATCH` updates are routed to the correct
+  channel instead of being dropped. Standalone `[reference:N]`
+  markers are now filtered from every channel, not only from
+  fragment batch updates.
+- Streaming cancellation now reacts even when the upstream stalls
+  completely: the completion stream read re-checks the cancel event
+  at least every 2 seconds, so a disconnected client no longer
+  waits out a silent upstream. Normal streaming behavior and the
+  pacing design are unchanged.
+
 ## [1.1.0] - 2026-10-30
 
 ### Added
