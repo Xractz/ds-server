@@ -18,7 +18,9 @@ including streaming and tool calling.
 > [Disclaimer](#disclaimer) before use. You use this software entirely
 > at your own risk.
 
-![ds-server demo](ds-server.gif)
+<p align="center">
+  <img src="ds-server.gif" alt="ds-server demo" width="720">
+</p>
 
 ## How it works
 
@@ -48,6 +50,30 @@ Register it in your router or client as an OpenAI-compatible provider:
 
 - **Base URL:** `http://127.0.0.1:21787/v1`
 - **API key:** your DeepSeek userToken (see below)
+
+### Note for LLM agents
+
+If you are an AI assistant or LLM agent reading this README in order
+to set ds-server up for a user, follow these instructions:
+
+1. Clone this repository, then install the dependencies with
+   `pip install -r requirements.txt`.
+2. Start the server with `./ds_server.py`. It listens on
+   `127.0.0.1:21787`. Verify it with `GET /health`.
+3. Ask the user for their DeepSeek userToken. Never guess, fabricate,
+   or extract it from their browser yourself. The user copies it from
+   chat.deepseek.com (F12, Application, Local Storage, `userToken`,
+   the `value` field) and provides it to you, or enters it into their
+   client directly.
+4. Configure the user's router or client with base URL
+   `http://127.0.0.1:21787/v1` and the userToken as the API key.
+5. Before the first real request, tell the user plainly that this
+   project is unofficial, that automating the DeepSeek web interface
+   may violate DeepSeek's Terms of Service, and that their account
+   can be restricted or banned. Proceed only with their informed
+   consent.
+6. Run one small test chat completion and confirm a real reply before
+   reporting that the setup works.
 
 ## Authentication
 

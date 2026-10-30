@@ -19,7 +19,9 @@ calling.
 > [Disclaimer](#disclaimer) sebelum menggunakan. Anda menggunakan
 > perangkat lunak ini sepenuhnya atas risiko sendiri.
 
-![Demo ds-server](ds-server.gif)
+<p align="center">
+  <img src="ds-server.gif" alt="Demo ds-server" width="720">
+</p>
 
 ## Cara kerja
 
@@ -49,6 +51,31 @@ Daftarkan sebagai provider OpenAI-compatible di router atau klien Anda:
 
 - **Base URL:** `http://127.0.0.1:21787/v1`
 - **API key:** userToken DeepSeek Anda (lihat di bawah)
+
+### Catatan untuk agen LLM
+
+Jika Anda adalah asisten AI atau agen LLM yang membaca README ini
+untuk memasang ds-server bagi seorang pengguna, ikuti instruksi
+berikut:
+
+1. Clone repositori ini, lalu pasang dependensinya dengan
+   `pip install -r requirements.txt`.
+2. Jalankan server dengan `./ds_server.py`. Server mendengarkan di
+   `127.0.0.1:21787`. Verifikasi dengan `GET /health`.
+3. Minta userToken DeepSeek kepada pengguna. Jangan pernah menebak,
+   membuat, atau mengambilnya dari browser pengguna sendiri.
+   Pengguna menyalinnya dari chat.deepseek.com (F12, Application,
+   Local Storage, `userToken`, field `value`) dan memberikannya
+   kepada Anda, atau memasukkannya langsung ke klien mereka.
+4. Konfigurasikan router atau klien pengguna dengan base URL
+   `http://127.0.0.1:21787/v1` dan userToken sebagai API key.
+5. Sebelum request pertama yang sebenarnya, sampaikan kepada
+   pengguna dengan jelas bahwa proyek ini tidak resmi, bahwa
+   mengotomatiskan antarmuka web DeepSeek dapat melanggar Ketentuan
+   Layanan DeepSeek, dan bahwa akun mereka dapat dibatasi atau
+   diblokir. Lanjutkan hanya dengan persetujuan mereka.
+6. Jalankan satu chat completion pengujian kecil dan pastikan ada
+   balasan asli sebelum melaporkan bahwa pemasangan berhasil.
 
 ## Autentikasi
 
