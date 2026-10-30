@@ -299,6 +299,11 @@ class CompletionService:
                 answer = client.fetch_history_text(session_id)
             except Exception:
                 pass
+            if answer and on_token is not None:
+                # Nothing was streamed, so a streaming client would
+                # otherwise see an empty reply: deliver the fallback
+                # text through the token callback as one content piece.
+                on_token(StreamParser.CONTENT, answer)
 
         chains.update(
             key, parent=result.response_id,

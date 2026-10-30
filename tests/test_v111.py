@@ -309,5 +309,104 @@ class FixtureCorpusTest(unittest.TestCase):
                     self.assertNotIn(forbidden, text)
 
 
+try:
+    import ds_server
+    from ds_server import ChatRequest, CompletionService
+    HAS_SERVER = True
+except ImportError:
+    HAS_SERVER = False
+
+import deepseek_web
+from deepseek_web.core import ChatResult
+
+
+class _FallbackChains:
+    def __init__(self):
+        self.updated = None
+
+    def get(self, key):
+        return None
+
+    def is_continuation(self, record, messages):
+        return False
+
+    def put(self, key, session_id, model):
+        pass
+
+    def update(self, key, **kwargs):
+        self.updated = kwargs
+
+    @staticmethod
+    def fingerprint(message):
+        return "fp"
+
+
+class _EmptyClient:
+    """Completion parses to nothing; the history holds the text."""
+
+    def __init__(self, history="teks dari history"):
+        self._history = history
+        self.history_calls = 0
+
+    def create_session(self):
+        return "session-1"
+
+    def chat_completion(self, session_id, parent, prompt, file_ids,
+                        **kwargs):
+        return ChatResult(content="", response_id=7)
+
+    def fetch_history_text(self, session_id):
+        self.history_calls += 1
+        return self._history
+
+
+@unittest.skipUnless(HAS_SERVER, "ds_server dependencies not installed")
+class HistoryFallbackStreamingTest(unittest.TestCase):
+    """A stream that yields no tokens still delivers the fallback."""
+
+    def make_request(self):
+        return ChatRequest.from_body(
+            {"model": "deepseek-chat",
+             "messages": [{"role": "user", "content": "halo"}]})
+
+    def test_fallback_text_is_emitted_through_on_token(self):
+        service = CompletionService(_FallbackChains())
+        client = _EmptyClient()
+        emitted = []
+        answer, _thinking, _status = service.run(
+            client, self.make_request(), "key",
+            on_token=lambda kind, text: emitted.append((kind, text)))
+        self.assertEqual(answer, "teks dari history")
+        self.assertEqual(emitted,
+                         [(StreamParser.CONTENT, "teks dari history")])
+
+    def test_history_not_called_when_answer_present(self):
+        class FullClient(_EmptyClient):
+            def chat_completion(self, session_id, parent, prompt,
+                                file_ids, **kwargs):
+                return ChatResult(content="ada jawaban", response_id=8)
+
+        service = CompletionService(_FallbackChains())
+        client = FullClient()
+        emitted = []
+        answer, _thinking, _status = service.run(
+            client, self.make_request(), "key",
+            on_token=lambda kind, text: emitted.append((kind, text)))
+        self.assertEqual(answer, "ada jawaban")
+        self.assertEqual(client.history_calls, 0)
+        self.assertEqual(emitted, [])
+
+
+@unittest.skipUnless(HAS_SERVER, "ds_server dependencies not installed")
+class HealthVersionTest(unittest.TestCase):
+    def test_health_reports_the_package_version(self):
+        client = ds_server.create_app().test_client()
+        response = client.get("/health")
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["version"], deepseek_web.__version__)
+
+
 if __name__ == "__main__":
     unittest.main()
