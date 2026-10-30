@@ -59,6 +59,14 @@ class DSError(Exception):
         self.status = status
 
 
+class StreamCancelled(Exception):
+    """Raised when the caller aborts a streaming completion.
+
+    Deliberately not a DSError: a cancellation is not a backend
+    failure and must never trigger the expired-session retry.
+    """
+
+
 class TokenStore:
     """Resolves the DeepSeek account token for one request.
 
@@ -427,6 +435,12 @@ class DeepSeekClient:
         self._pow = pow_solver or PowSolver()
         self._device_id = device_id or DeviceIdentity.resolve()
         self._pacer = pacer or SHARED_PACER
+        self._retries = 0
+
+    @property
+    def retries(self):
+        """How many upstream retries this client has performed."""
+        return self._retries
 
     # -- request plumbing ----------------------------------------------
 
@@ -481,12 +495,14 @@ class DeepSeekClient:
                     raise DSError(
                         f"{description}: connection failed after "
                         f"{attempt + 1} attempts") from error
+                self._retries += 1
                 time.sleep(self._retry_delay(attempt))
                 attempt += 1
                 continue
             if response.status_code not in self.RETRYABLE_STATUS \
                     or attempt >= self.MAX_RETRIES:
                 return response
+            self._retries += 1
             delay = self._retry_delay(attempt, response)
             try:
                 response.close()
@@ -670,7 +686,8 @@ class DeepSeekClient:
 
     def chat_completion(self, session_id, parent_id, prompt,
                         ref_file_ids=None, thinking=False, search=False,
-                        model_type="default", on_token=None):
+                        model_type="default", on_token=None,
+                        cancel_event=None):
         """Send one message and stream the reply.
 
         ``on_token`` is invoked as ``on_token(kind, text)`` for every
@@ -680,16 +697,24 @@ class DeepSeekClient:
         The call runs inside the shared pacer slot: completions are
         serialized process-wide and spaced out, so concurrent clients
         queue instead of bursting against the backend.
+
+        When ``cancel_event`` (a threading.Event) becomes set, the
+        upstream read is aborted, the connection is closed, and
+        :class:`StreamCancelled` is raised, which releases the pacer
+        slot immediately instead of letting the completion run to the
+        end for a caller that has already gone away.
         """
         with self._pacer.completion_slot():
             return self._run_completion(
                 session_id, parent_id, prompt,
                 ref_file_ids=ref_file_ids, thinking=thinking,
-                search=search, model_type=model_type, on_token=on_token)
+                search=search, model_type=model_type, on_token=on_token,
+                cancel_event=cancel_event)
 
     def _run_completion(self, session_id, parent_id, prompt,
                         ref_file_ids=None, thinking=False, search=False,
-                        model_type="default", on_token=None):
+                        model_type="default", on_token=None,
+                        cancel_event=None):
         """Execute one completion inside the pacer slot."""
         headers = self._pow_headers("/api/v0/chat/completion")
         headers["referer"] = \
@@ -718,33 +743,45 @@ class DeepSeekClient:
             raise DSError("completion rejected: "
                           f"{response.json().get('msg')}")
 
-        parser = StreamParser(on_token=on_token)
+        def guarded_on_token(kind, text):
+            if cancel_event is not None and cancel_event.is_set():
+                raise StreamCancelled("stream cancelled by the caller")
+            if on_token:
+                on_token(kind, text)
+
+        parser = StreamParser(on_token=guarded_on_token)
         result = ChatResult()
         debug = bool(os.environ.get("DS_DEBUG"))
         debug_lines = []
 
-        for line in response.iter_lines(decode_unicode=True):
-            if debug and len(debug_lines) < 15:
-                debug_lines.append(repr(line))
-            if not line:
-                continue
-            line = line.lstrip("\ufeff").strip()
-            if not line.startswith("data:"):
-                continue
-            data = line[5:].strip()
-            if data == "[DONE]":
-                break
-            try:
-                event = json.loads(data)
-            except Exception:
-                continue
-            if not isinstance(event, dict):
-                continue
-            if "request_message_id" in event:
-                result.request_id = event.get("request_message_id")
-                result.response_id = event.get("response_message_id")
-                continue
-            parser.feed(event)
+        try:
+            for line in response.iter_lines(decode_unicode=True):
+                if cancel_event is not None and cancel_event.is_set():
+                    raise StreamCancelled(
+                        "stream cancelled by the caller")
+                if debug and len(debug_lines) < 15:
+                    debug_lines.append(repr(line))
+                if not line:
+                    continue
+                line = line.lstrip("\ufeff").strip()
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    event = json.loads(data)
+                except Exception:
+                    continue
+                if not isinstance(event, dict):
+                    continue
+                if "request_message_id" in event:
+                    result.request_id = event.get("request_message_id")
+                    result.response_id = event.get("response_message_id")
+                    continue
+                parser.feed(event)
+        finally:
+            response.close()
 
         if debug and debug_lines:
             with open("/tmp/ds-debug.log", "a") as handle:

@@ -6,7 +6,8 @@ session chain store for OpenAI-compatible clients. The REST server in
 ``ds_server.py`` is a thin entry point on top of this package.
 """
 from .core import (ChatResult, DeepSeekClient, DeviceIdentity, DSError,
-                   PowSolver, RequestPacer, StreamParser, TokenStore)
+                   PowSolver, RequestPacer, StreamCancelled, StreamParser,
+                   TokenStore)
 from .sessions import ChainStore
 from .tools import (MessageView, PromptBuilder, ToolCall, ToolCallParser,
                     ToolCatalog, ToolDef, estimate_tokens)
@@ -21,6 +22,7 @@ __all__ = [
     "PowSolver",
     "PromptBuilder",
     "RequestPacer",
+    "StreamCancelled",
     "StreamParser",
     "TokenStore",
     "ToolCall",
