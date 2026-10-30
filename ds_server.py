@@ -44,6 +44,28 @@ from deepseek_web import __version__
 
 MODELS = ["deepseek-chat", "deepseek-reasoner"]
 LEGACY_ALIASES = ("deepseek-v3", "deepseek-r1")
+ALIAS_OF = {"deepseek-v3": "deepseek-chat",
+            "deepseek-r1": "deepseek-reasoner"}
+# What each model can actually do through the web backend, declared on
+# /v1/models so routers and clients do not have to guess capabilities
+# from the model name. Both models read images (uploads) and reason
+# (payload-controlled thinking for chat, native for reasoner); tool
+# calling is emulated and search is the backend's native search.
+MODEL_CAPABILITIES = {
+    model: {"vision": True, "reasoning": True, "tools": True,
+            "search": True}
+    for model in MODELS
+}
+
+
+def model_entry(model_id):
+    """One /v1/models entry, with capability metadata."""
+    caps = MODEL_CAPABILITIES[ALIAS_OF.get(model_id, model_id)]
+    return {"id": model_id, "object": "model", "created": 1700000000,
+            "owned_by": "deepseek", "capabilities": caps,
+            "architecture": {
+                "input_modalities": ["text", "image"],
+                "output_modalities": ["text"]}}
 REASONER_MODELS = {"deepseek-reasoner", "deepseek-r1", "r1", "reasoner"}
 
 
@@ -404,15 +426,13 @@ def create_app():
 
     @app.get("/v1/models")
     def list_models():
-        return jsonify({"object": "list", "data": [
-            {"id": model, "object": "model", "created": 1700000000,
-             "owned_by": "deepseek"} for model in MODELS]})
+        return jsonify({"object": "list",
+                        "data": [model_entry(model) for model in MODELS]})
 
     @app.get("/v1/models/<model_id>")
     def get_model(model_id):
         if model_id in MODELS or model_id in LEGACY_ALIASES:
-            return jsonify({"id": model_id, "object": "model",
-                            "created": 1700000000, "owned_by": "deepseek"})
+            return jsonify(model_entry(model_id))
         return error_response(f"model '{model_id}' not found", 404,
                               "invalid_request_error", "model_not_found")
 

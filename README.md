@@ -137,6 +137,11 @@ The legacy aliases `deepseek-v3` and `deepseek-r1` remain accepted in
 chat completions with identical behavior; they are simply no longer
 advertised.
 
+Each entry also declares the model's capabilities (`vision`,
+`reasoning`, `tools`, `search`) and its input and output modalities,
+so routers and clients can display and route on them instead of
+guessing from the model name.
+
 ### Thinking and search are payload-controlled
 
 The model name only sets the default. Payload parameters always win:

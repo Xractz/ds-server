@@ -140,6 +140,11 @@ Alias lama `deepseek-v3` dan `deepseek-r1` tetap diterima di chat
 completions dengan perilaku yang sama persis, hanya tidak ditampilkan
 lagi di daftar model.
 
+Setiap entri juga mendeklarasikan kemampuan modelnya (`vision`,
+`reasoning`, `tools`, `search`) beserta modalitas input dan outputnya,
+jadi router dan klien bisa menampilkan dan mengarahkan berdasarkan
+itu, bukan menebak dari nama model.
+
 ### Thinking dan search dikontrol dari payload
 
 Nama model hanya menentukan nilai bawaan. Parameter payload selalu

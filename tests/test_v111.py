@@ -408,5 +408,30 @@ class HealthVersionTest(unittest.TestCase):
         self.assertEqual(body["version"], deepseek_web.__version__)
 
 
+@unittest.skipUnless(HAS_SERVER, "ds_server dependencies not installed")
+class ModelsMetadataTest(unittest.TestCase):
+    """The /v1/models listing declares real capabilities."""
+
+    def setUp(self):
+        self.client = ds_server.create_app().test_client()
+
+    def test_listing_declares_vision_and_reasoning(self):
+        body = self.client.get("/v1/models").get_json()
+        entries = {entry["id"]: entry for entry in body["data"]}
+        self.assertEqual(set(entries),
+                         {"deepseek-chat", "deepseek-reasoner"})
+        for entry in entries.values():
+            self.assertTrue(entry["capabilities"]["vision"])
+            self.assertTrue(entry["capabilities"]["reasoning"])
+            self.assertIn("image",
+                          entry["architecture"]["input_modalities"])
+
+    def test_alias_entry_carries_the_canonical_capabilities(self):
+        body = self.client.get("/v1/models/deepseek-r1").get_json()
+        self.assertEqual(body["id"], "deepseek-r1")
+        self.assertTrue(body["capabilities"]["reasoning"])
+        self.assertTrue(body["capabilities"]["vision"])
+
+
 if __name__ == "__main__":
     unittest.main()

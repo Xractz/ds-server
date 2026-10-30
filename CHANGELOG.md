@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The server version is now reported by the `/health` endpoint and in
   the startup line, from a single `__version__` constant in the
   package.
+- `/v1/models` now declares each model's capabilities (`vision`,
+  `reasoning`, `tools`, `search`) and its input and output modalities,
+  so routers and clients can display and route on them instead of
+  guessing from the model name. Legacy alias entries carry the
+  canonical model's capabilities.
 - Regression fixture corpus under `tests/fixtures` covering the
   historical parser failure shapes: SSE patch sequences for thinking
   routed through the -1 fragment selector, fragment lists appended
