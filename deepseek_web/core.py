@@ -131,23 +131,37 @@ class RequestPacer:
     intervals can be tuned with the ``DS_MIN_COMPLETION_INTERVAL`` and
     ``DS_MIN_SESSION_INTERVAL`` environment variables (seconds), and
     pacing can be disabled entirely with ``DS_PACING=0``.
+
+    The pacer is also adaptive: every upstream 429 that forces a retry
+    widens the effective intervals (the penalty doubles from a floor,
+    up to a cap) and the penalty then decays with a half-life, so the
+    server backs off while the backend is under pressure and relaxes
+    on its own afterwards. Adaptation can be switched off with
+    ``DS_ADAPTIVE_PACING=0``.
     """
 
     DEFAULT_COMPLETION_INTERVAL = 0.4
     DEFAULT_SESSION_INTERVAL = 1.0
+    PENALTY_FLOOR = 2.0
+    PENALTY_CAP = 30.0
+    PENALTY_HALF_LIFE = 60.0
 
     def __init__(self, completion_interval=DEFAULT_COMPLETION_INTERVAL,
                  session_interval=DEFAULT_SESSION_INTERVAL, enabled=True,
+                 adaptive=True,
                  clock=time.monotonic, sleep=time.sleep):
         self._completion_interval = max(0.0, float(completion_interval))
         self._session_interval = max(0.0, float(session_interval))
         self._enabled = bool(enabled)
+        self._adaptive = bool(adaptive)
         self._clock = clock
         self._sleep = sleep
         self._completion_lock = threading.Lock()
         self._stamp_lock = threading.Lock()
         self._last_completion_start = None
         self._last_session_start = None
+        self._penalty = 0.0
+        self._penalty_at = None
 
     @classmethod
     def from_env(cls):
@@ -166,7 +180,41 @@ class RequestPacer:
                 "DS_MIN_SESSION_INTERVAL", cls.DEFAULT_SESSION_INTERVAL),
             enabled=os.environ.get("DS_PACING", "1").strip().lower()
             not in ("0", "false", "no", "off"),
+            adaptive=os.environ.get(
+                "DS_ADAPTIVE_PACING", "1").strip().lower()
+            not in ("0", "false", "no", "off"),
         )
+
+    def _penalty_locked(self):
+        """The current penalty in seconds, decayed to now.
+
+        The caller must hold ``_stamp_lock``.
+        """
+        if self._penalty_at is None or self._penalty <= 0:
+            return 0.0
+        elapsed = max(0.0, self._clock() - self._penalty_at)
+        return self._penalty * (0.5 ** (elapsed / self.PENALTY_HALF_LIFE))
+
+    @property
+    def current_penalty(self):
+        """Seconds currently added to the pacing intervals."""
+        with self._stamp_lock:
+            return self._penalty_locked()
+
+    def note_rate_limited(self):
+        """Widen the intervals after an upstream rate limit.
+
+        The penalty doubles from ``PENALTY_FLOOR`` up to
+        ``PENALTY_CAP`` on every call, measured from its current
+        decayed value, and then relaxes with ``PENALTY_HALF_LIFE``.
+        """
+        if not self._enabled or not self._adaptive:
+            return
+        with self._stamp_lock:
+            widened = min(max(self._penalty_locked() * 2.0,
+                              self.PENALTY_FLOOR), self.PENALTY_CAP)
+            self._penalty = widened
+            self._penalty_at = self._clock()
 
     def _wait_since(self, last, interval):
         if not self._enabled or interval <= 0 or last is None:
@@ -184,7 +232,8 @@ class RequestPacer:
         with self._completion_lock:
             with self._stamp_lock:
                 last = self._last_completion_start
-            self._wait_since(last, self._completion_interval)
+            self._wait_since(
+                last, self._completion_interval + self.current_penalty)
             with self._stamp_lock:
                 self._last_completion_start = self._clock()
             yield
@@ -195,7 +244,8 @@ class RequestPacer:
             return
         with self._stamp_lock:
             last = self._last_session_start
-        self._wait_since(last, self._session_interval)
+        self._wait_since(
+            last, self._session_interval + self.current_penalty)
         with self._stamp_lock:
             self._last_session_start = self._clock()
 
@@ -579,6 +629,8 @@ class DeepSeekClient:
             if response.status_code not in self.RETRYABLE_STATUS \
                     or attempt >= self.MAX_RETRIES:
                 return response
+            if response.status_code == 429:
+                self._pacer.note_rate_limited()
             self._retries += 1
             delay = self._retry_delay(attempt, response)
             try:
