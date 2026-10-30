@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from deepseek_web import core
 from deepseek_web.core import (DeepSeekClient, RequestPacer,
-                               StreamCancelled)
+                               StreamCancelled, StreamParser)
 from deepseek_web.tools import ToolCallParser
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -264,6 +264,49 @@ class StalledStreamCancelTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self._run(response, cancel)
         self.assertTrue(response.closed)
+
+
+class FixtureCorpusTest(unittest.TestCase):
+    """Every file under tests/fixtures must keep parsing stably.
+
+    The corpus captures historical failure shapes, not just current
+    behavior: SSE patch sequences for the fragment bugs and
+    mixed-dialect tool replies, including mojibake-damaged DSML.
+    Adding a new failure shape means adding a fixture here, not a
+    one-off inline sample.
+    """
+
+    def test_sse_fixtures(self):
+        files = sorted(FIXTURES.glob("sse_*.json"))
+        self.assertGreaterEqual(len(files), 4)
+        for path in files:
+            with self.subTest(fixture=path.name):
+                case = json.loads(path.read_text())
+                parser = StreamParser()
+                for event in case["events"]:
+                    parser.feed(event)
+                self.assertEqual(parser.content,
+                                 case["expected_content"])
+                self.assertEqual(parser.thinking,
+                                 case["expected_thinking"])
+
+    def test_tool_fixtures(self):
+        files = sorted(FIXTURES.glob("tool_*.json"))
+        self.assertGreaterEqual(len(files), 2)
+        parser = ToolCallParser()
+        for path in files:
+            with self.subTest(fixture=path.name):
+                case = json.loads(path.read_text())
+                text, calls = parser.parse(
+                    case["reply"], valid_names=set(case["valid_names"]))
+                self.assertEqual(
+                    [(call.name, call.arguments)
+                     for call in calls],
+                    [(call["name"], call["arguments"])
+                     for call in case["expected_calls"]])
+                self.assertEqual(text, case["expected_text"])
+                for forbidden in case["forbidden"]:
+                    self.assertNotIn(forbidden, text)
 
 
 if __name__ == "__main__":

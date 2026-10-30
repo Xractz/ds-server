@@ -282,8 +282,11 @@ class StreamParser:
       discarded.
 
     An index of ``-1`` in a path always refers to the most recently
-    registered fragment. Structural citation markers of the form
-    ``[reference:N]`` are filtered out of the answer text.
+    registered fragment. Fragment updates may also arrive as lists
+    appended or batched at the response level itself, rather than
+    under ``response/fragments``. Structural citation markers of the
+    form ``[reference:N]`` that arrive as standalone chunks are
+    filtered out of every channel.
     """
 
     CONTENT = "content"
@@ -317,6 +320,11 @@ class StreamParser:
 
     def _emit(self, kind, text):
         if kind == self.IGNORE or not isinstance(text, str) or not text:
+            return
+        # A standalone citation marker is structure, not text, in
+        # every channel: it arrives as its own chunk from fragment
+        # appends, batch updates, and fragment snapshots alike.
+        if re.fullmatch(r"\[reference:\d+\]", text.strip()):
             return
         if kind == self.THINKING:
             self._thinking_parts.append(text)
@@ -373,13 +381,35 @@ class StreamParser:
             return
 
         # Batch update at response level; fragment appends inside it
-        # carry the first characters of a response.
+        # carry the first characters of a response. A sub-update
+        # without a path is a fragment dict in its own right.
         if path == "response" and operation == "BATCH" \
                 and isinstance(value, list):
             for sub in value:
                 if not isinstance(sub, dict):
                     continue
-                if sub.get("p") == "fragments" \
+                if "p" not in sub:
+                    self._register(sub)
+                elif sub.get("p") == "fragments" \
+                        and sub.get("o") == "APPEND":
+                    for fragment in sub.get("v") or []:
+                        self._register(fragment)
+                elif isinstance(sub.get("v"), str) \
+                        and str(sub.get("p", "")).endswith("/content"):
+                    self._emit(self._kind_at("response/" + str(sub["p"])),
+                               sub["v"])
+            return
+
+        # Fragment append at response level: the same shapes as the
+        # batch branch, but with an APPEND operation.
+        if path == "response" and operation == "APPEND" \
+                and isinstance(value, list):
+            for sub in value:
+                if not isinstance(sub, dict):
+                    continue
+                if "p" not in sub:
+                    self._register(sub)
+                elif sub.get("p") == "fragments" \
                         and sub.get("o") == "APPEND":
                     for fragment in sub.get("v") or []:
                         self._register(fragment)
@@ -396,16 +426,14 @@ class StreamParser:
                 self._register(fragment)
             return
 
-        # Batch update inside one fragment.
+        # Batch update inside one fragment. Standalone citation
+        # markers are dropped by _emit, like everywhere else.
         if path.startswith("response/fragments/") \
                 and operation == "BATCH" and isinstance(value, list):
             for sub in value:
                 if isinstance(sub, dict) and sub.get("p") == "content":
-                    text = sub.get("v")
-                    if isinstance(text, str) and re.fullmatch(
-                            r"\[reference:\d+\]", text.strip()):
-                        continue
-                    self._emit(self._kind_at(path + "/content"), text)
+                    self._emit(self._kind_at(path + "/content"),
+                               sub.get("v"))
             return
 
         # Text append to one fragment. The operation may be absent at a

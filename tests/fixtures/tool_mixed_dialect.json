@@ -1,0 +1,28 @@
+{
+ "description": "Mixed-dialect reply: a fenced tool_call block plus a DSML invoke, closed by a stray tool_call tag. Both calls must parse and no tag debris may survive in the visible text.",
+ "reply": "Checking ```tool_call\n{\"name\": \"bash\", \"arguments\": {\"command\": \"ls\"}}\n``` then <｜｜DSML｜｜invoke name=\"read\"><｜｜DSML｜｜parameter name=\"path\" string=\"true\">/tmp/x</｜｜DSML｜｜parameter></｜｜DSML｜｜invoke> trailing </tool_call>",
+ "valid_names": [
+  "bash",
+  "read"
+ ],
+ "expected_calls": [
+  {
+   "name": "bash",
+   "arguments": {
+    "command": "ls"
+   }
+  },
+  {
+   "name": "read",
+   "arguments": {
+    "path": "/tmp/x"
+   }
+  }
+ ],
+ "expected_text": "Checking  then  trailing",
+ "forbidden": [
+  "DSML",
+  "tool_call",
+  "｜"
+ ]
+}
