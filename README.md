@@ -200,12 +200,20 @@ The intervals can be tuned with the `DS_MIN_COMPLETION_INTERVAL` and
 be disabled entirely with `DS_PACING=0`. Disabling it is not recommended:
 bursts are the most visible signature of automation.
 
+The pacer also adapts on its own. Whenever the backend answers 429 and
+a request has to be retried, the minimum intervals widen automatically:
+the added penalty doubles from 2 seconds up to a 30 second cap, then
+relaxes back with a 60 second half-life once the pressure passes. Set
+`DS_ADAPTIVE_PACING=0` to keep the intervals fixed.
+
 ## Streaming and logging
 
 Requests with `stream: true` are streamed live from the backend, token
 by token. If the client disconnects mid-stream, the upstream read is
 aborted and the pacing slot is released immediately, instead of
-completing a reply nobody is waiting for. Requests that use tools are
+completing a reply nobody is waiting for. Cancellation is re-checked
+every couple of seconds, so it also fires when the backend stalls
+without sending anything. Requests that use tools are
 the exception: tool calls are parsed from the complete reply, so those
 responses are buffered and then replayed as a stream.
 

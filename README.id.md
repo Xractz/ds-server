@@ -205,12 +205,20 @@ detik), dan pacing dapat dimatikan sepenuhnya dengan `DS_PACING=0`.
 Mematikannya tidak disarankan: ledakan request adalah tanda otomasi
 yang paling mudah terlihat.
 
+Pacer-nya juga beradaptasi sendiri. Setiap backend membalas 429 dan
+sebuah request harus di-retry, interval minimalnya melebar otomatis:
+penalti tambahannya berlipat dua dari 2 detik sampai batas 30 detik,
+lalu melonggar lagi dengan waktu paruh 60 detik begitu tekanannya
+lewat. Set `DS_ADAPTIVE_PACING=0` supaya intervalnya tetap.
+
 ## Streaming dan logging
 
 Request dengan `stream: true` di-stream langsung dari backend, token
 demi token. Jika klien terputus di tengah stream, bacaan ke upstream
 dihentikan dan slot pacing langsung bebas, bukan menyelesaikan balasan
-yang sudah tidak ditunggu siapa pun. Request yang memakai tool adalah
+yang sudah tidak ditunggu siapa pun. Pembatalan dicek ulang tiap
+beberapa detik, jadi tetap jalan walau backend membeku tanpa mengirim
+apa pun. Request yang memakai tool adalah
 pengecualian: tool call di-parse dari balasan yang lengkap, jadi
 responsnya ditampung dulu lalu diputar sebagai stream.
 

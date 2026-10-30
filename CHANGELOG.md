@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Adaptive pacing: whenever the backend answers 429 and a request has
+  to be retried, the pacer widens its minimum intervals automatically
+  (the penalty doubles from 2 seconds up to a 30 second cap) and then
+  relaxes with a 60 second half-life. Set `DS_ADAPTIVE_PACING=0` to
+  keep the intervals fixed.
+- The server version is now reported by the `/health` endpoint and in
+  the startup line, from a single `__version__` constant in the
+  package.
 - Regression fixture corpus under `tests/fixtures` covering the
   historical parser failure shapes: SSE patch sequences for thinking
   routed through the -1 fragment selector, fragment lists appended
@@ -18,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A streamed request whose parsing produced no text now delivers the
+  history fallback through the stream as one content piece, matching
+  the buffered path; before, streaming clients silently received an
+  empty reply in that case.
 - Tool replies with fused dialects no longer leak markup into the
   visible text: a DSML invoke block closed by a `tool_call` tag (or
   by its calls wrapper) is now parsed as a call, and any orphaned
