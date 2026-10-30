@@ -422,9 +422,12 @@ class ModelsMetadataTest(unittest.TestCase):
                          {"deepseek-chat", "deepseek-reasoner"})
         for entry in entries.values():
             self.assertTrue(entry["capabilities"]["vision"])
-            self.assertTrue(entry["capabilities"]["reasoning"])
             self.assertIn("image",
                           entry["architecture"]["input_modalities"])
+        chat = entries["deepseek-chat"]["capabilities"]
+        reasoner = entries["deepseek-reasoner"]["capabilities"]
+        self.assertFalse(chat["reasoning"])
+        self.assertTrue(reasoner["reasoning"])
 
     def test_alias_entry_carries_the_canonical_capabilities(self):
         body = self.client.get("/v1/models/deepseek-r1").get_json()

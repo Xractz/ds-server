@@ -20,8 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/v1/models` now declares each model's capabilities (`vision`,
   `reasoning`, `tools`, `search`) and its input and output modalities,
   so routers and clients can display and route on them instead of
-  guessing from the model name. Legacy alias entries carry the
-  canonical model's capabilities.
+  guessing from the model name. The declaration follows each model's
+  own mode: `deepseek-chat` is the plain mode and declares no
+  reasoning, `deepseek-reasoner` is the thinking mode. Legacy alias
+  entries carry the canonical model's capabilities.
 - Regression fixture corpus under `tests/fixtures` covering the
   historical parser failure shapes: SSE patch sequences for thinking
   routed through the -1 fragment selector, fragment lists appended

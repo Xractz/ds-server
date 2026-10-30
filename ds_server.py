@@ -49,13 +49,17 @@ ALIAS_OF = {"deepseek-v3": "deepseek-chat",
             "deepseek-r1": "deepseek-reasoner"}
 # What each model can actually do through the web backend, declared on
 # /v1/models so routers and clients do not have to guess capabilities
-# from the model name. Both models read images (uploads) and reason
-# (payload-controlled thinking for chat, native for reasoner); tool
-# calling is emulated and search is the backend's native search.
+# from the model name. deepseek-chat is the plain mode of the web chat
+# model: it reads images (uploads) and supports the emulated tool
+# calling and the backend's native search, but it does not reason.
+# deepseek-reasoner is the thinking mode, so it declares reasoning as
+# well. (A client can still ask deepseek-chat to think through the
+# payload; the declaration follows each model's own mode.)
 MODEL_CAPABILITIES = {
-    model: {"vision": True, "reasoning": True, "tools": True,
-            "search": True}
-    for model in MODELS
+    "deepseek-chat": {"vision": True, "reasoning": False,
+                      "tools": True, "search": True},
+    "deepseek-reasoner": {"vision": True, "reasoning": True,
+                          "tools": True, "search": True},
 }
 
 
