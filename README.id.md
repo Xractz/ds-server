@@ -137,9 +137,8 @@ environment variable `DS_DEVICE_ID` untuk menetapkan nilai tertentu.
   nyala secara bawaan; hasil penalaran dikembalikan sebagai
   `reasoning_content`, sama seperti API resmi DeepSeek
 
-Alias lama `deepseek-v3` dan `deepseek-r1` tetap diterima di chat
-completions dengan perilaku yang sama persis, hanya tidak ditampilkan
-lagi di daftar model.
+Hanya dua nama model ini yang dilayani; nama model lain ditolak
+dengan error `model_not_found`.
 
 Setiap entri juga mendeklarasikan kemampuan modelnya (`vision`,
 `reasoning`, `tools`, `search`) beserta modalitas input dan outputnya,

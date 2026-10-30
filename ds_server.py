@@ -15,9 +15,9 @@ environment variable is accepted as a fallback for headless setups.
 
 Models: ``/v1/models`` advertises the two modes of the DeepSeek web
 chat model (currently the V4 family): ``deepseek-chat`` with thinking
-off by default and ``deepseek-reasoner`` with thinking on. The legacy
-aliases ``deepseek-v3`` and ``deepseek-r1`` remain accepted in chat
-completions. Thinking and web search are controlled per request
+off by default and ``deepseek-reasoner`` with thinking on. Only these
+two model names are served; any other name is rejected as an unknown
+model. Thinking and web search are controlled per request
 through the payload (see :meth:`ChatRequest.resolve_thinking`), with
 the model name acting only as the default.
 
@@ -44,9 +44,6 @@ from deepseek_web import (ChainStore, DeepSeekClient, DSError,
 from deepseek_web import __version__
 
 MODELS = ["deepseek-chat", "deepseek-reasoner"]
-LEGACY_ALIASES = ("deepseek-v3", "deepseek-r1")
-ALIAS_OF = {"deepseek-v3": "deepseek-chat",
-            "deepseek-r1": "deepseek-reasoner"}
 # What each model can actually do through the web backend, declared on
 # /v1/models so routers and clients do not have to guess capabilities
 # from the model name. deepseek-chat is the plain mode of the web chat
@@ -65,13 +62,13 @@ MODEL_CAPABILITIES = {
 
 def model_entry(model_id):
     """One /v1/models entry, with capability metadata."""
-    caps = MODEL_CAPABILITIES[ALIAS_OF.get(model_id, model_id)]
+    caps = MODEL_CAPABILITIES[model_id]
     return {"id": model_id, "object": "model", "created": 1700000000,
             "owned_by": "deepseek", "capabilities": caps,
             "architecture": {
                 "input_modalities": ["text", "image"],
                 "output_modalities": ["text"]}}
-REASONER_MODELS = {"deepseek-reasoner", "deepseek-r1", "r1", "reasoner"}
+REASONER_MODELS = {"deepseek-reasoner"}
 
 
 def error_response(message, status=500, error_type="upstream_error",
@@ -177,8 +174,7 @@ class ChatRequest:
 
     @staticmethod
     def is_reasoner_model(model):
-        return model in REASONER_MODELS or "reasoner" in model \
-            or "-r1" in model
+        return model in REASONER_MODELS
 
     @staticmethod
     def resolve_thinking(body, model):
@@ -436,7 +432,7 @@ def create_app():
 
     @app.get("/v1/models/<model_id>")
     def get_model(model_id):
-        if model_id in MODELS or model_id in LEGACY_ALIASES:
+        if model_id in MODELS:
             return jsonify(model_entry(model_id))
         return error_response(f"model '{model_id}' not found", 404,
                               "invalid_request_error", "model_not_found")
@@ -565,6 +561,11 @@ def create_app():
                 "Missing API key. Present the DeepSeek userToken as the "
                 "API key (Authorization: Bearer <userToken>).", 401,
                 "authentication_error", "invalid_api_key")
+
+        model = body.get("model") or "deepseek-chat"
+        if model not in MODELS:
+            return error_response(f"model '{model}' not found", 404,
+                                  "invalid_request_error", "model_not_found")
 
         chat_request = ChatRequest.from_body(body)
         client = DeepSeekClient(token)

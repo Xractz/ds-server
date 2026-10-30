@@ -22,8 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so routers and clients can display and route on them instead of
   guessing from the model name. The declaration follows each model's
   own mode: `deepseek-chat` is the plain mode and declares no
-  reasoning, `deepseek-reasoner` is the thinking mode. Legacy alias
-  entries carry the canonical model's capabilities.
+  reasoning, `deepseek-reasoner` is the thinking mode.
 - Regression fixture corpus under `tests/fixtures` covering the
   historical parser failure shapes: SSE patch sequences for thinking
   routed through the -1 fragment selector, fragment lists appended
@@ -39,6 +38,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checkpoint without notice, and the web API does not report which
   one served a request), so the models are now described as the web
   chat model in its plain and thinking modes.
+
+### Removed
+
+- The legacy model aliases `deepseek-v3` and `deepseek-r1` are gone.
+  Only `deepseek-chat` and `deepseek-reasoner` are served: lookups of
+  any other model name return a `model_not_found` error, and chat
+  completions reject unknown model names the same way instead of
+  silently treating them as `deepseek-chat`.
 
 ### Fixed
 

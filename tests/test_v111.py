@@ -429,11 +429,20 @@ class ModelsMetadataTest(unittest.TestCase):
         self.assertFalse(chat["reasoning"])
         self.assertTrue(reasoner["reasoning"])
 
-    def test_alias_entry_carries_the_canonical_capabilities(self):
-        body = self.client.get("/v1/models/deepseek-r1").get_json()
-        self.assertEqual(body["id"], "deepseek-r1")
-        self.assertTrue(body["capabilities"]["reasoning"])
-        self.assertTrue(body["capabilities"]["vision"])
+    def test_removed_aliases_are_not_served(self):
+        for alias in ("deepseek-v3", "deepseek-r1"):
+            response = self.client.get(f"/v1/models/{alias}")
+            self.assertEqual(response.status_code, 404)
+
+    def test_chat_rejects_an_unknown_model(self):
+        response = self.client.post(
+            "/v1/chat/completions",
+            json={"model": "deepseek-r1",
+                  "messages": [{"role": "user", "content": "hi"}]},
+            headers={"Authorization": "Bearer test-token"})
+        self.assertEqual(response.status_code, 404)
+        error = response.get_json()["error"]
+        self.assertEqual(error["code"], "model_not_found")
 
 
 if __name__ == "__main__":

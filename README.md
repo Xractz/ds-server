@@ -135,9 +135,8 @@ Set the `DS_DEVICE_ID` environment variable to pin a specific value.
   default; the reasoning is returned as `reasoning_content`, matching
   the official DeepSeek API
 
-The legacy aliases `deepseek-v3` and `deepseek-r1` remain accepted in
-chat completions with identical behavior; they are simply no longer
-advertised.
+Only these two model names are served; any other model name is
+rejected with a `model_not_found` error.
 
 Each entry also declares the model's capabilities (`vision`,
 `reasoning`, `tools`, `search`) and its input and output modalities,
