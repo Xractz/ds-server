@@ -49,6 +49,35 @@ def error_response(message, status=500, error_type="upstream_error",
                               "code": code}}), status
 
 
+def upstream_error_response(exc):
+    """Map a backend failure to a client-facing OpenAI-style error.
+
+    The upstream HTTP status carried by the DSError drives the mapping,
+    so routers and agents above this server can react correctly instead
+    of treating every failure as a generic gateway error:
+
+    - 429 stays 429 (``rate_limit_error``): clients back off.
+    - 401/403 become 401 (``authentication_error``): the supplied
+      userToken was rejected by DeepSeek.
+    - Other upstream 4xx pass through as ``invalid_request_error``.
+    - Everything else (upstream 5xx, connection failures, business
+      errors reported over HTTP 200) becomes 502 ``upstream_error``.
+    """
+    status = getattr(exc, "status", None)
+    message = str(exc)
+    if status == 429:
+        return error_response(message, 429, "rate_limit_error",
+                              "rate_limit_exceeded")
+    if status in (401, 403):
+        return error_response(
+            "DeepSeek rejected the supplied userToken "
+            f"(HTTP {status}). Check that the token is valid.",
+            401, "authentication_error", "invalid_api_key")
+    if status is not None and 400 <= status < 500:
+        return error_response(message, status, "invalid_request_error")
+    return error_response(message, 502, "upstream_error")
+
+
 class ChainLocks:
     """One lock per session chain.
 
@@ -368,7 +397,7 @@ def create_app():
                 full_text, thinking_text = service.run(
                     client, chat_request, key)
             except DSError as exc:
-                return error_response(str(exc), 502)
+                return upstream_error_response(exc)
             except Exception as exc:
                 return error_response(f"internal: {exc}", 500,
                                       "internal_error")

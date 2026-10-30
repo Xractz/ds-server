@@ -47,7 +47,16 @@ USER_AGENT = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
 
 
 class DSError(Exception):
-    """Raised when the DeepSeek backend rejects or fails a request."""
+    """Raised when the DeepSeek backend rejects or fails a request.
+
+    ``status`` carries the upstream HTTP status when one is known, so
+    the server can map the failure to an appropriate client-facing
+    status (for example 429 for rate limits) instead of a generic one.
+    """
+
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
 
 
 class TokenStore:
@@ -437,6 +446,23 @@ class DeepSeekClient:
                     pass
         return delay
 
+    @staticmethod
+    def _business_error(context, detail):
+        """Build a DSError for a business-level rejection.
+
+        The backend reports some failures, including rejected tokens,
+        as business errors over HTTP 200 rather than with an HTTP
+        status. Recognizable authorization failures are tagged with
+        status 401 so they surface to clients as authentication
+        errors instead of generic gateway errors.
+        """
+        lowered = str(detail).lower()
+        markers = ("authorization failed", "invalid token",
+                   "unauthorized", "token expired", "token invalid")
+        status = 401 if any(marker in lowered for marker in markers) \
+            else None
+        return DSError(f"{context}: {detail}", status=status)
+
     def _request(self, description, send):
         """Execute one HTTP request, retrying transient failures.
 
@@ -511,10 +537,12 @@ class DeepSeekClient:
                 json={"target_path": target_path}, timeout=30))
         if response.status_code != 200:
             raise DSError("create_pow_challenge: "
-                          f"HTTP {response.status_code}")
+                          f"HTTP {response.status_code}",
+                          status=response.status_code)
         payload = response.json()
         if payload.get("code") != 0:
-            raise DSError(f"create_pow_challenge: {payload.get('msg')}")
+            raise self._business_error("create_pow_challenge",
+                                       payload.get("msg"))
         challenge = payload["data"]["biz_data"]["challenge"]
         proof = {
             "algorithm": "DeepSeekHashV1",
@@ -536,12 +564,14 @@ class DeepSeekClient:
                 API_BASE + path, headers=headers or self.headers(),
                 json=body, timeout=30))
         if response.status_code != 200:
-            raise DSError(f"{path}: HTTP {response.status_code}")
+            raise DSError(f"{path}: HTTP {response.status_code}",
+                          status=response.status_code)
         payload = response.json()
         if payload.get("code") != 0 \
                 or payload.get("data", {}).get("biz_code") != 0:
-            raise DSError(f"{path}: {payload.get('msg')}/"
-                          f"{payload.get('data', {}).get('biz_msg')}")
+            raise self._business_error(
+                path, f"{payload.get('msg')}/"
+                      f"{payload.get('data', {}).get('biz_msg')}")
         return payload["data"]["biz_data"]
 
     # -- sessions --------------------------------------------------------
@@ -578,11 +608,13 @@ class DeepSeekClient:
                 API_BASE + "/file/upload_file", headers=headers,
                 files={"file": (filename, data, mime)}, timeout=120))
         if response.status_code != 200:
-            raise DSError(f"upload {filename}: HTTP {response.status_code}")
+            raise DSError(f"upload {filename}: HTTP {response.status_code}",
+                          status=response.status_code)
         payload = response.json()
         if payload.get("code") != 0 \
                 or payload.get("data", {}).get("biz_code") != 0:
-            raise DSError(f"upload {filename}: {payload.get('msg')}")
+            raise self._business_error(f"upload {filename}",
+                                       payload.get("msg"))
         file_id = payload["data"]["biz_data"]["id"]
 
         for _ in range(20):
@@ -680,7 +712,8 @@ class DeepSeekClient:
                                   headers=headers, json=body,
                                   timeout=300, stream=True))
         if response.status_code != 200:
-            raise DSError(f"completion: HTTP {response.status_code}")
+            raise DSError(f"completion: HTTP {response.status_code}",
+                          status=response.status_code)
         if "application/json" in response.headers.get("content-type", ""):
             raise DSError("completion rejected: "
                           f"{response.json().get('msg')}")
