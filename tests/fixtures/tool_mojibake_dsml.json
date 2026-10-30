@@ -1,0 +1,21 @@
+{
+ "description": "Mojibake-damaged DSML: fullwidth pipes replaced by replacement characters, plus a stray mojibake calls wrapper. The call must still parse and the debris must be swept.",
+ "reply": "<�DSML�invoke name=\"bash\"><�DSML�parameter name=\"command\" string=\"true\">ls -la</�DSML�parameter></�DSML�invoke> checked <�DSML�calls> end",
+ "valid_names": [
+  "bash"
+ ],
+ "expected_calls": [
+  {
+   "name": "bash",
+   "arguments": {
+    "command": "ls -la"
+   }
+  }
+ ],
+ "expected_text": "checked  end",
+ "forbidden": [
+  "DSML",
+  "�",
+  "｜"
+ ]
+}

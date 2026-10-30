@@ -13,10 +13,11 @@ userToken. It is read from the ``Authorization: Bearer`` header (or
 request. The server stores no credential of its own; the ``DS_TOKEN``
 environment variable is accepted as a fallback for headless setups.
 
-Models: ``/v1/models`` advertises the two real engines,
-``deepseek-chat`` (V3) and ``deepseek-reasoner`` (R1). The legacy
-aliases ``deepseek-v3`` and ``deepseek-r1`` remain accepted in chat
-completions. Thinking and web search are controlled per request
+Models: ``/v1/models`` advertises the two modes of the DeepSeek web
+chat model (currently the V4 family): ``deepseek-chat`` with thinking
+off by default and ``deepseek-reasoner`` with thinking on. Only these
+two model names are served; any other name is rejected as an unknown
+model. Thinking and web search are controlled per request
 through the payload (see :meth:`ChatRequest.resolve_thinking`), with
 the model name acting only as the default.
 
@@ -40,10 +41,34 @@ from deepseek_web import (ChainStore, DeepSeekClient, DSError,
                           MessageView, PromptBuilder, StreamCancelled,
                           StreamParser, TokenStore, ToolCatalog,
                           ToolCallParser, estimate_tokens)
+from deepseek_web import __version__
 
 MODELS = ["deepseek-chat", "deepseek-reasoner"]
-LEGACY_ALIASES = ("deepseek-v3", "deepseek-r1")
-REASONER_MODELS = {"deepseek-reasoner", "deepseek-r1", "r1", "reasoner"}
+# What each model can actually do through the web backend, declared on
+# /v1/models so routers and clients do not have to guess capabilities
+# from the model name. deepseek-chat is the plain mode of the web chat
+# model: it reads images (uploads) and supports the emulated tool
+# calling and the backend's native search, but it does not reason.
+# deepseek-reasoner is the thinking mode, so it declares reasoning as
+# well. (A client can still ask deepseek-chat to think through the
+# payload; the declaration follows each model's own mode.)
+MODEL_CAPABILITIES = {
+    "deepseek-chat": {"vision": True, "reasoning": False,
+                      "tools": True, "search": True},
+    "deepseek-reasoner": {"vision": True, "reasoning": True,
+                          "tools": True, "search": True},
+}
+
+
+def model_entry(model_id):
+    """One /v1/models entry, with capability metadata."""
+    caps = MODEL_CAPABILITIES[model_id]
+    return {"id": model_id, "object": "model", "created": 1700000000,
+            "owned_by": "deepseek", "capabilities": caps,
+            "architecture": {
+                "input_modalities": ["text", "image"],
+                "output_modalities": ["text"]}}
+REASONER_MODELS = {"deepseek-reasoner"}
 
 
 def error_response(message, status=500, error_type="upstream_error",
@@ -149,8 +174,7 @@ class ChatRequest:
 
     @staticmethod
     def is_reasoner_model(model):
-        return model in REASONER_MODELS or "reasoner" in model \
-            or "-r1" in model
+        return model in REASONER_MODELS
 
     @staticmethod
     def resolve_thinking(body, model):
@@ -299,6 +323,11 @@ class CompletionService:
                 answer = client.fetch_history_text(session_id)
             except Exception:
                 pass
+            if answer and on_token is not None:
+                # Nothing was streamed, so a streaming client would
+                # otherwise see an empty reply: deliver the fallback
+                # text through the token callback as one content piece.
+                on_token(StreamParser.CONTENT, answer)
 
         chains.update(
             key, parent=result.response_id,
@@ -394,19 +423,17 @@ def create_app():
 
     @app.get("/health")
     def health():
-        return jsonify({"ok": True})
+        return jsonify({"ok": True, "version": __version__})
 
     @app.get("/v1/models")
     def list_models():
-        return jsonify({"object": "list", "data": [
-            {"id": model, "object": "model", "created": 1700000000,
-             "owned_by": "deepseek"} for model in MODELS]})
+        return jsonify({"object": "list",
+                        "data": [model_entry(model) for model in MODELS]})
 
     @app.get("/v1/models/<model_id>")
     def get_model(model_id):
-        if model_id in MODELS or model_id in LEGACY_ALIASES:
-            return jsonify({"id": model_id, "object": "model",
-                            "created": 1700000000, "owned_by": "deepseek"})
+        if model_id in MODELS:
+            return jsonify(model_entry(model_id))
         return error_response(f"model '{model_id}' not found", 404,
                               "invalid_request_error", "model_not_found")
 
@@ -535,6 +562,11 @@ def create_app():
                 "API key (Authorization: Bearer <userToken>).", 401,
                 "authentication_error", "invalid_api_key")
 
+        model = body.get("model") or "deepseek-chat"
+        if model not in MODELS:
+            return error_response(f"model '{model}' not found", 404,
+                                  "invalid_request_error", "model_not_found")
+
         chat_request = ChatRequest.from_body(body)
         client = DeepSeekClient(token)
         key = chains.key_for(chat_request.messages, chat_request.model)
@@ -605,7 +637,8 @@ def main():
     parser.add_argument("--host", default="127.0.0.1")
     args = parser.parse_args()
 
-    print(f"ds-server running at http://{args.host}:{args.port}")
+    print(f"ds-server {__version__} running at "
+          f"http://{args.host}:{args.port}")
     print("OpenAI-compatible provider: base_url "
           f"http://{args.host}:{args.port}/v1")
     print("API key: the DeepSeek userToken (Authorization: Bearer).")

@@ -8,9 +8,9 @@ API key berbayar.
 
 ds-server dirancang untuk didaftarkan sebagai provider
 OpenAI-compatible di router seperti 9Router, sehingga aplikasi chat
-dan framework agent dapat menggunakan DeepSeek V3 dan R1 melalui
-antarmuka chat completions standar, termasuk streaming dan tool
-calling.
+dan framework agent dapat menggunakan DeepSeek web chat melalui
+antarmuka chat completions standar, dalam mode biasa maupun
+thinking, termasuk streaming dan tool calling.
 
 > [!WARNING]
 > Proyek ini tidak resmi dan mengotomatiskan antarmuka web DeepSeek.
@@ -131,14 +131,19 @@ environment variable `DS_DEVICE_ID` untuk menetapkan nilai tertentu.
 
 `GET /v1/models` menampilkan dua mesin aslinya:
 
-- `deepseek-chat`: DeepSeek V3 (thinking mati secara bawaan)
-- `deepseek-reasoner`: DeepSeek R1 (thinking nyala secara bawaan;
-  hasil penalaran dikembalikan sebagai `reasoning_content`, sama
-  seperti API resmi DeepSeek)
+- `deepseek-chat`: model DeepSeek web chat (saat ini keluarga V4;
+  thinking mati secara bawaan)
+- `deepseek-reasoner`: model web chat yang sama dengan thinking
+  nyala secara bawaan; hasil penalaran dikembalikan sebagai
+  `reasoning_content`, sama seperti API resmi DeepSeek
 
-Alias lama `deepseek-v3` dan `deepseek-r1` tetap diterima di chat
-completions dengan perilaku yang sama persis, hanya tidak ditampilkan
-lagi di daftar model.
+Hanya dua nama model ini yang dilayani; nama model lain ditolak
+dengan error `model_not_found`.
+
+Setiap entri juga mendeklarasikan kemampuan modelnya (`vision`,
+`reasoning`, `tools`, `search`) beserta modalitas input dan outputnya,
+jadi router dan klien bisa menampilkan dan mengarahkan berdasarkan
+itu, bukan menebak dari nama model.
 
 ### Thinking dan search dikontrol dari payload
 
@@ -205,12 +210,20 @@ detik), dan pacing dapat dimatikan sepenuhnya dengan `DS_PACING=0`.
 Mematikannya tidak disarankan: ledakan request adalah tanda otomasi
 yang paling mudah terlihat.
 
+Pacer-nya juga beradaptasi sendiri. Setiap backend membalas 429 dan
+sebuah request harus di-retry, interval minimalnya melebar otomatis:
+penalti tambahannya berlipat dua dari 2 detik sampai batas 30 detik,
+lalu melonggar lagi dengan waktu paruh 60 detik begitu tekanannya
+lewat. Set `DS_ADAPTIVE_PACING=0` supaya intervalnya tetap.
+
 ## Streaming dan logging
 
 Request dengan `stream: true` di-stream langsung dari backend, token
 demi token. Jika klien terputus di tengah stream, bacaan ke upstream
 dihentikan dan slot pacing langsung bebas, bukan menyelesaikan balasan
-yang sudah tidak ditunggu siapa pun. Request yang memakai tool adalah
+yang sudah tidak ditunggu siapa pun. Pembatalan dicek ulang tiap
+beberapa detik, jadi tetap jalan walau backend membeku tanpa mengirim
+apa pun. Request yang memakai tool adalah
 pengecualian: tool call di-parse dari balasan yang lengkap, jadi
 responsnya ditampung dulu lalu diputar sebagai stream.
 

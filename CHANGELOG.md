@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Adaptive pacing: whenever the backend answers 429 and a request has
+  to be retried, the pacer widens its minimum intervals automatically
+  (the penalty doubles from 2 seconds up to a 30 second cap) and then
+  relaxes with a 60 second half-life. Set `DS_ADAPTIVE_PACING=0` to
+  keep the intervals fixed.
+- The server version is now reported by the `/health` endpoint and in
+  the startup line, from a single `__version__` constant in the
+  package.
+- `/v1/models` now declares each model's capabilities (`vision`,
+  `reasoning`, `tools`, `search`) and its input and output modalities,
+  so routers and clients can display and route on them instead of
+  guessing from the model name. The declaration follows each model's
+  own mode: `deepseek-chat` is the plain mode and declares no
+  reasoning, `deepseek-reasoner` is the thinking mode.
+- Regression fixture corpus under `tests/fixtures` covering the
+  historical parser failure shapes: SSE patch sequences for thinking
+  routed through the -1 fragment selector, fragment lists appended
+  and batched at the response level, transition chunks with no
+  operation plus standalone `[reference:N]` markers, and
+  mixed-dialect tool replies including mojibake-damaged DSML.
+
+### Changed
+
+- The model labels in the README and the module docs no longer call
+  the web chat models DeepSeek V3 and R1. The web chat has run the
+  DeepSeek V4 family since April 2026 (the vendor replaces the web
+  checkpoint without notice, and the web API does not report which
+  one served a request), so the models are now described as the web
+  chat model in its plain and thinking modes.
+
+### Removed
+
+- The legacy model aliases `deepseek-v3` and `deepseek-r1` are gone.
+  Only `deepseek-chat` and `deepseek-reasoner` are served: lookups of
+  any other model name return a `model_not_found` error, and chat
+  completions reject unknown model names the same way instead of
+  silently treating them as `deepseek-chat`.
+
+### Fixed
+
+- A streamed request whose parsing produced no text now delivers the
+  history fallback through the stream as one content piece, matching
+  the buffered path; before, streaming clients silently received an
+  empty reply in that case.
+- Tool replies with fused dialects no longer leak markup into the
+  visible text: a DSML invoke block closed by a `tool_call` tag (or
+  by its calls wrapper) is now parsed as a call, and any orphaned
+  DSML or `tool_call` tag debris left after extraction is stripped
+  by a final sweep. Long fenced code blocks in tool-carrying
+  replies stay capped at 10 lines plus a trimmed note, while plain
+  replies are untouched; both behaviors are now covered by tests.
+- The stream parser now handles fragment updates that arrive at
+  the response level itself: lists appended with `APPEND` and bare
+  fragment dicts inside `BATCH` updates are routed to the correct
+  channel instead of being dropped. Standalone `[reference:N]`
+  markers are now filtered from every channel, not only from
+  fragment batch updates.
+- Streaming cancellation now reacts even when the upstream stalls
+  completely: the completion stream read re-checks the cancel event
+  at least every 2 seconds, so a disconnected client no longer
+  waits out a silent upstream. Normal streaming behavior and the
+  pacing design are unchanged.
+
 ## [1.1.0] - 2026-10-30
 
 ### Added

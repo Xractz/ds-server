@@ -188,5 +188,56 @@ class BackoffTest(unittest.TestCase):
         self.assertEqual(delays, [1.0, 2.0, 4.0])
 
 
+class AdaptivePacingTest(unittest.TestCase):
+    """The penalty widens on 429s and relaxes on its own."""
+
+    def make_pacer(self, **kwargs):
+        clock = FakeClock()
+        pacer = RequestPacer(clock=clock, sleep=clock.sleep, **kwargs)
+        return pacer, clock
+
+    def test_penalty_starts_at_zero_and_floors(self):
+        pacer, _clock = self.make_pacer()
+        self.assertEqual(pacer.current_penalty, 0.0)
+        pacer.note_rate_limited()
+        self.assertEqual(pacer.current_penalty, RequestPacer.PENALTY_FLOOR)
+
+    def test_penalty_doubles_and_caps(self):
+        pacer, _clock = self.make_pacer()
+        seen = []
+        for _ in range(6):
+            pacer.note_rate_limited()
+            seen.append(pacer.current_penalty)
+        self.assertEqual(seen, [2.0, 4.0, 8.0, 16.0, 30.0, 30.0])
+
+    def test_penalty_decays_with_half_life(self):
+        pacer, clock = self.make_pacer()
+        pacer.note_rate_limited()
+        clock.now += RequestPacer.PENALTY_HALF_LIFE
+        self.assertAlmostEqual(pacer.current_penalty, 1.0)
+        clock.now += RequestPacer.PENALTY_HALF_LIFE
+        self.assertAlmostEqual(pacer.current_penalty, 0.5)
+
+    def test_penalty_widens_completion_spacing(self):
+        pacer, clock = self.make_pacer(completion_interval=0.5)
+        with pacer.completion_slot():
+            pass
+        pacer.note_rate_limited()
+        with pacer.completion_slot():
+            pass
+        self.assertEqual(len(clock.sleeps), 1)
+        self.assertAlmostEqual(clock.sleeps[0], 0.5 + 2.0)
+
+    def test_adaptive_disabled_ignores_notes(self):
+        pacer, _clock = self.make_pacer(adaptive=False)
+        pacer.note_rate_limited()
+        self.assertEqual(pacer.current_penalty, 0.0)
+
+    def test_pacing_disabled_ignores_notes(self):
+        pacer, _clock = self.make_pacer(enabled=False)
+        pacer.note_rate_limited()
+        self.assertEqual(pacer.current_penalty, 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

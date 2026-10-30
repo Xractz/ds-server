@@ -8,7 +8,8 @@ required.
 
 ds-server is built to be registered as an OpenAI-compatible provider in
 routers such as 9Router, so chat applications and agent frameworks can
-use DeepSeek V3 and R1 through the standard chat completions interface,
+use the DeepSeek web chat through the standard chat completions
+interface, in both its plain and thinking modes,
 including streaming and tool calling.
 
 > [!WARNING]
@@ -128,14 +129,19 @@ Set the `DS_DEVICE_ID` environment variable to pin a specific value.
 
 `GET /v1/models` advertises the two real engines:
 
-- `deepseek-chat`: DeepSeek V3 (thinking off by default)
-- `deepseek-reasoner`: DeepSeek R1 (thinking on by default; the
-  reasoning is returned as `reasoning_content`, matching the official
-  DeepSeek API)
+- `deepseek-chat`: the DeepSeek web chat model (currently the V4
+  family; thinking off by default)
+- `deepseek-reasoner`: the same web chat model with thinking on by
+  default; the reasoning is returned as `reasoning_content`, matching
+  the official DeepSeek API
 
-The legacy aliases `deepseek-v3` and `deepseek-r1` remain accepted in
-chat completions with identical behavior; they are simply no longer
-advertised.
+Only these two model names are served; any other model name is
+rejected with a `model_not_found` error.
+
+Each entry also declares the model's capabilities (`vision`,
+`reasoning`, `tools`, `search`) and its input and output modalities,
+so routers and clients can display and route on them instead of
+guessing from the model name.
 
 ### Thinking and search are payload-controlled
 
@@ -200,12 +206,20 @@ The intervals can be tuned with the `DS_MIN_COMPLETION_INTERVAL` and
 be disabled entirely with `DS_PACING=0`. Disabling it is not recommended:
 bursts are the most visible signature of automation.
 
+The pacer also adapts on its own. Whenever the backend answers 429 and
+a request has to be retried, the minimum intervals widen automatically:
+the added penalty doubles from 2 seconds up to a 30 second cap, then
+relaxes back with a 60 second half-life once the pressure passes. Set
+`DS_ADAPTIVE_PACING=0` to keep the intervals fixed.
+
 ## Streaming and logging
 
 Requests with `stream: true` are streamed live from the backend, token
 by token. If the client disconnects mid-stream, the upstream read is
 aborted and the pacing slot is released immediately, instead of
-completing a reply nobody is waiting for. Requests that use tools are
+completing a reply nobody is waiting for. Cancellation is re-checked
+every couple of seconds, so it also fires when the backend stalls
+without sending anything. Requests that use tools are
 the exception: tool calls are parsed from the complete reply, so those
 responses are buffered and then replayed as a stream.
 

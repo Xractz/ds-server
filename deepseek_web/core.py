@@ -25,6 +25,7 @@ import base64
 import json
 import mimetypes
 import os
+import queue
 import re
 import struct
 import threading
@@ -130,23 +131,37 @@ class RequestPacer:
     intervals can be tuned with the ``DS_MIN_COMPLETION_INTERVAL`` and
     ``DS_MIN_SESSION_INTERVAL`` environment variables (seconds), and
     pacing can be disabled entirely with ``DS_PACING=0``.
+
+    The pacer is also adaptive: every upstream 429 that forces a retry
+    widens the effective intervals (the penalty doubles from a floor,
+    up to a cap) and the penalty then decays with a half-life, so the
+    server backs off while the backend is under pressure and relaxes
+    on its own afterwards. Adaptation can be switched off with
+    ``DS_ADAPTIVE_PACING=0``.
     """
 
     DEFAULT_COMPLETION_INTERVAL = 0.4
     DEFAULT_SESSION_INTERVAL = 1.0
+    PENALTY_FLOOR = 2.0
+    PENALTY_CAP = 30.0
+    PENALTY_HALF_LIFE = 60.0
 
     def __init__(self, completion_interval=DEFAULT_COMPLETION_INTERVAL,
                  session_interval=DEFAULT_SESSION_INTERVAL, enabled=True,
+                 adaptive=True,
                  clock=time.monotonic, sleep=time.sleep):
         self._completion_interval = max(0.0, float(completion_interval))
         self._session_interval = max(0.0, float(session_interval))
         self._enabled = bool(enabled)
+        self._adaptive = bool(adaptive)
         self._clock = clock
         self._sleep = sleep
         self._completion_lock = threading.Lock()
         self._stamp_lock = threading.Lock()
         self._last_completion_start = None
         self._last_session_start = None
+        self._penalty = 0.0
+        self._penalty_at = None
 
     @classmethod
     def from_env(cls):
@@ -165,7 +180,41 @@ class RequestPacer:
                 "DS_MIN_SESSION_INTERVAL", cls.DEFAULT_SESSION_INTERVAL),
             enabled=os.environ.get("DS_PACING", "1").strip().lower()
             not in ("0", "false", "no", "off"),
+            adaptive=os.environ.get(
+                "DS_ADAPTIVE_PACING", "1").strip().lower()
+            not in ("0", "false", "no", "off"),
         )
+
+    def _penalty_locked(self):
+        """The current penalty in seconds, decayed to now.
+
+        The caller must hold ``_stamp_lock``.
+        """
+        if self._penalty_at is None or self._penalty <= 0:
+            return 0.0
+        elapsed = max(0.0, self._clock() - self._penalty_at)
+        return self._penalty * (0.5 ** (elapsed / self.PENALTY_HALF_LIFE))
+
+    @property
+    def current_penalty(self):
+        """Seconds currently added to the pacing intervals."""
+        with self._stamp_lock:
+            return self._penalty_locked()
+
+    def note_rate_limited(self):
+        """Widen the intervals after an upstream rate limit.
+
+        The penalty doubles from ``PENALTY_FLOOR`` up to
+        ``PENALTY_CAP`` on every call, measured from its current
+        decayed value, and then relaxes with ``PENALTY_HALF_LIFE``.
+        """
+        if not self._enabled or not self._adaptive:
+            return
+        with self._stamp_lock:
+            widened = min(max(self._penalty_locked() * 2.0,
+                              self.PENALTY_FLOOR), self.PENALTY_CAP)
+            self._penalty = widened
+            self._penalty_at = self._clock()
 
     def _wait_since(self, last, interval):
         if not self._enabled or interval <= 0 or last is None:
@@ -183,7 +232,8 @@ class RequestPacer:
         with self._completion_lock:
             with self._stamp_lock:
                 last = self._last_completion_start
-            self._wait_since(last, self._completion_interval)
+            self._wait_since(
+                last, self._completion_interval + self.current_penalty)
             with self._stamp_lock:
                 self._last_completion_start = self._clock()
             yield
@@ -194,7 +244,8 @@ class RequestPacer:
             return
         with self._stamp_lock:
             last = self._last_session_start
-        self._wait_since(last, self._session_interval)
+        self._wait_since(
+            last, self._session_interval + self.current_penalty)
         with self._stamp_lock:
             self._last_session_start = self._clock()
 
@@ -281,8 +332,11 @@ class StreamParser:
       discarded.
 
     An index of ``-1`` in a path always refers to the most recently
-    registered fragment. Structural citation markers of the form
-    ``[reference:N]`` are filtered out of the answer text.
+    registered fragment. Fragment updates may also arrive as lists
+    appended or batched at the response level itself, rather than
+    under ``response/fragments``. Structural citation markers of the
+    form ``[reference:N]`` that arrive as standalone chunks are
+    filtered out of every channel.
     """
 
     CONTENT = "content"
@@ -316,6 +370,11 @@ class StreamParser:
 
     def _emit(self, kind, text):
         if kind == self.IGNORE or not isinstance(text, str) or not text:
+            return
+        # A standalone citation marker is structure, not text, in
+        # every channel: it arrives as its own chunk from fragment
+        # appends, batch updates, and fragment snapshots alike.
+        if re.fullmatch(r"\[reference:\d+\]", text.strip()):
             return
         if kind == self.THINKING:
             self._thinking_parts.append(text)
@@ -372,13 +431,35 @@ class StreamParser:
             return
 
         # Batch update at response level; fragment appends inside it
-        # carry the first characters of a response.
+        # carry the first characters of a response. A sub-update
+        # without a path is a fragment dict in its own right.
         if path == "response" and operation == "BATCH" \
                 and isinstance(value, list):
             for sub in value:
                 if not isinstance(sub, dict):
                     continue
-                if sub.get("p") == "fragments" \
+                if "p" not in sub:
+                    self._register(sub)
+                elif sub.get("p") == "fragments" \
+                        and sub.get("o") == "APPEND":
+                    for fragment in sub.get("v") or []:
+                        self._register(fragment)
+                elif isinstance(sub.get("v"), str) \
+                        and str(sub.get("p", "")).endswith("/content"):
+                    self._emit(self._kind_at("response/" + str(sub["p"])),
+                               sub["v"])
+            return
+
+        # Fragment append at response level: the same shapes as the
+        # batch branch, but with an APPEND operation.
+        if path == "response" and operation == "APPEND" \
+                and isinstance(value, list):
+            for sub in value:
+                if not isinstance(sub, dict):
+                    continue
+                if "p" not in sub:
+                    self._register(sub)
+                elif sub.get("p") == "fragments" \
                         and sub.get("o") == "APPEND":
                     for fragment in sub.get("v") or []:
                         self._register(fragment)
@@ -395,16 +476,14 @@ class StreamParser:
                 self._register(fragment)
             return
 
-        # Batch update inside one fragment.
+        # Batch update inside one fragment. Standalone citation
+        # markers are dropped by _emit, like everywhere else.
         if path.startswith("response/fragments/") \
                 and operation == "BATCH" and isinstance(value, list):
             for sub in value:
                 if isinstance(sub, dict) and sub.get("p") == "content":
-                    text = sub.get("v")
-                    if isinstance(text, str) and re.fullmatch(
-                            r"\[reference:\d+\]", text.strip()):
-                        continue
-                    self._emit(self._kind_at(path + "/content"), text)
+                    self._emit(self._kind_at(path + "/content"),
+                               sub.get("v"))
             return
 
         # Text append to one fragment. The operation may be absent at a
@@ -446,6 +525,54 @@ class DeepSeekClient:
 
     RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
     MAX_RETRIES = 3
+
+    # How often the streaming read re-checks the cancel event while
+    # the upstream sends nothing. The read runs on a daemon thread
+    # feeding a queue, so a stalled upstream cannot block the check:
+    # the main loop wakes at least this often, sees the event, and
+    # aborts. Normal traffic is unaffected, since lines are forwarded
+    # as soon as they arrive.
+    STREAM_CANCEL_POLL_SECONDS = 2.0
+
+    @staticmethod
+    def _iter_lines_cancellable(response, cancel_event,
+                                poll_seconds=None):
+        """Yield SSE lines, re-checking ``cancel_event`` while stalled.
+
+        When no line arrives within ``poll_seconds``, the loop wakes,
+        checks the event, and either keeps waiting or raises
+        StreamCancelled. Reader errors are re-raised on the caller
+        thread. The reader thread is a daemon, so a stalled read can
+        never block process exit after the response is closed.
+        """
+        if poll_seconds is None:
+            poll_seconds = DeepSeekClient.STREAM_CANCEL_POLL_SECONDS
+        delivered = queue.Queue()
+
+        def feed():
+            try:
+                for line in response.iter_lines(decode_unicode=True):
+                    delivered.put(("line", line))
+            except Exception as error:
+                delivered.put(("error", error))
+            finally:
+                delivered.put(("end", None))
+
+        thread = threading.Thread(target=feed, daemon=True)
+        thread.start()
+        while True:
+            try:
+                kind, payload = delivered.get(timeout=poll_seconds)
+            except queue.Empty:
+                if cancel_event.is_set():
+                    raise StreamCancelled(
+                        "stream cancelled by the caller")
+                continue
+            if kind == "end":
+                return
+            if kind == "error":
+                raise payload
+            yield payload
 
     @staticmethod
     def _retry_delay(attempt, response=None):
@@ -502,6 +629,8 @@ class DeepSeekClient:
             if response.status_code not in self.RETRYABLE_STATUS \
                     or attempt >= self.MAX_RETRIES:
                 return response
+            if response.status_code == 429:
+                self._pacer.note_rate_limited()
             self._retries += 1
             delay = self._retry_delay(attempt, response)
             try:
@@ -702,7 +831,10 @@ class DeepSeekClient:
         upstream read is aborted, the connection is closed, and
         :class:`StreamCancelled` is raised, which releases the pacer
         slot immediately instead of letting the completion run to the
-        end for a caller that has already gone away.
+        end for a caller that has already gone away. The check also
+        runs while the upstream is fully stalled: the stream read
+        wakes at least every ``STREAM_CANCEL_POLL_SECONDS`` to test
+        the event, instead of waiting for the next SSE line.
         """
         with self._pacer.completion_slot():
             return self._run_completion(
@@ -754,8 +886,17 @@ class DeepSeekClient:
         debug = bool(os.environ.get("DS_DEBUG"))
         debug_lines = []
 
+        # Without a cancel event the plain iterator is kept, so the
+        # normal path is byte-for-byte unchanged. With one, the
+        # polling reader guarantees the cancel check runs even when
+        # the upstream sends nothing for a long time.
+        if cancel_event is not None:
+            lines = self._iter_lines_cancellable(response, cancel_event)
+        else:
+            lines = response.iter_lines(decode_unicode=True)
+
         try:
-            for line in response.iter_lines(decode_unicode=True):
+            for line in lines:
                 if cancel_event is not None and cancel_event.is_set():
                     raise StreamCancelled(
                         "stream cancelled by the caller")

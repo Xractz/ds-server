@@ -12,7 +12,12 @@ The parser accepts every dialect the model is known to produce:
 fenced ``tool_call`` blocks, ``<tool_call>`` tags whose JSON payload is
 located with a balanced-brace scan (closing tags are unreliable), and
 DeepSeek's native DSML markup, including repair of mojibake-damaged
-fullwidth delimiters. Arguments supplied as a JSON string or flattened
+fullwidth delimiters. Closing tags are unreliable in the other
+direction too: a DSML invoke block may be closed by a ``tool_call``
+tag (or by its own calls wrapper), so those fused closers are
+accepted as well. Any tag debris left over after extraction is
+stripped from the visible text by a final sweep, never shown as
+content. Arguments supplied as a JSON string or flattened
 into the top level of the call object are normalized into a nested
 ``arguments`` dictionary.
 """
@@ -387,16 +392,31 @@ class ToolCallParser:
         raw = re.sub(r"(?<=DSML)[｜�]{1,5}", "｜｜", raw)
         return raw
 
+    # A DSML invoke block may be closed by its own invoke tag, by a
+    # tool_call tag, or by its calls wrapper: the model fuses dialects
+    # and closing tags are unreliable in every direction.
+    _DSML_CLOSER = (r"(?:</｜｜DSML｜｜\s*invoke>|</tool_call>"
+                    r"|</｜｜DSML｜｜\s*(?:tool_)?calls?>)")
+
     @classmethod
     def _parse_dsml(cls, raw, valid_names):
         """Extract DeepSeek's native DSML invocations.
 
         Returns (cleaned_text, [ToolCall]).
+
+        Only blocks that actually match (an invoke opener with a
+        name plus one of the accepted closers) are removed, by span,
+        so visible text sitting between two orphaned tags is kept
+        and only the tags themselves are left for the final sweep.
+        Blocks calling an unknown tool are still removed as markup,
+        even though no call is produced for them.
         """
         calls = []
+        spans = []
         for invoke in re.finditer(
                 r"<｜｜DSML｜｜\s*invoke\s+name=\"([^\"]+)\"[^>]*>"
-                r"(.*?)</｜｜DSML｜｜\s*invoke>", raw, re.S):
+                r"(.*?)" + cls._DSML_CLOSER, raw, re.S):
+            spans.append(invoke.span())
             name = invoke.group(1)
             if valid_names and name not in valid_names:
                 continue
@@ -417,9 +437,15 @@ class ToolCallParser:
                     except Exception:
                         arguments[key] = value
             calls.append(ToolCall(name=name, arguments=arguments))
-        cleaned = re.sub(
-            r"<｜｜DSML｜｜\s*invoke.*?</｜｜DSML｜｜\s*invoke>", "", raw,
-            flags=re.S)
+        if spans:
+            pieces, previous = [], 0
+            for start, end in spans:
+                pieces.append(raw[previous:start])
+                previous = max(previous, end)
+            pieces.append(raw[previous:])
+            cleaned = "".join(pieces)
+        else:
+            cleaned = raw
         cleaned = re.sub(r"</?｜｜DSML｜｜\s*(tool_)?calls?>", "", cleaned)
         return cleaned, calls
 
@@ -470,6 +496,22 @@ class ToolCallParser:
 
         return cls._FENCE.sub(replace, text)
 
+    # -- final sweep -----------------------------------------------------
+
+    @staticmethod
+    def _strip_debris(text):
+        """Strip orphaned tag debris from the visible text.
+
+        After every dialect has been extracted, any DSML tag or
+        tool_call tag still standing is markup, never content: stray
+        closers from fused blocks, orphaned openers, and bare wrapper
+        tags. The generic DSML pattern also covers parameter and
+        calls tags, so a lone opener or closer cannot survive.
+        """
+        text = re.sub(r"</?｜｜DSML｜｜[^>]*>", "", text)
+        text = re.sub(r"</?tool_call>", "", text)
+        return text.strip()
+
     # -- entry point -------------------------------------------------------
 
     def parse(self, text, valid_names=None):
@@ -500,8 +542,7 @@ class ToolCallParser:
         if dsml_calls:
             calls.extend(dsml_calls)
 
-        cleaned = re.sub(r"</?｜｜DSML｜｜[^>]*>", "", cleaned)
-        cleaned = re.sub(r"</?tool_call>", "", cleaned).strip()
+        cleaned = self._strip_debris(cleaned)
         if calls:
             cleaned = self._trim_code_blocks(cleaned)
         return cleaned, calls
