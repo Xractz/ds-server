@@ -8,9 +8,9 @@ API key berbayar.
 
 ds-server dirancang untuk didaftarkan sebagai provider
 OpenAI-compatible di router seperti 9Router, sehingga aplikasi chat
-dan framework agent dapat menggunakan DeepSeek V3 dan R1 melalui
-antarmuka chat completions standar, termasuk streaming dan tool
-calling.
+dan framework agent dapat menggunakan DeepSeek web chat melalui
+antarmuka chat completions standar, dalam mode biasa maupun
+thinking, termasuk streaming dan tool calling.
 
 > [!WARNING]
 > Proyek ini tidak resmi dan mengotomatiskan antarmuka web DeepSeek.
@@ -131,10 +131,11 @@ environment variable `DS_DEVICE_ID` untuk menetapkan nilai tertentu.
 
 `GET /v1/models` menampilkan dua mesin aslinya:
 
-- `deepseek-chat`: DeepSeek V3 (thinking mati secara bawaan)
-- `deepseek-reasoner`: DeepSeek R1 (thinking nyala secara bawaan;
-  hasil penalaran dikembalikan sebagai `reasoning_content`, sama
-  seperti API resmi DeepSeek)
+- `deepseek-chat`: model DeepSeek web chat (saat ini keluarga V4;
+  thinking mati secara bawaan)
+- `deepseek-reasoner`: model web chat yang sama dengan thinking
+  nyala secara bawaan; hasil penalaran dikembalikan sebagai
+  `reasoning_content`, sama seperti API resmi DeepSeek
 
 Alias lama `deepseek-v3` dan `deepseek-r1` tetap diterima di chat
 completions dengan perilaku yang sama persis, hanya tidak ditampilkan

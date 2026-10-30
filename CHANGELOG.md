@@ -29,6 +29,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   operation plus standalone `[reference:N]` markers, and
   mixed-dialect tool replies including mojibake-damaged DSML.
 
+### Changed
+
+- The model labels in the README and the module docs no longer call
+  the web chat models DeepSeek V3 and R1. The web chat has run the
+  DeepSeek V4 family since April 2026 (the vendor replaces the web
+  checkpoint without notice, and the web API does not report which
+  one served a request), so the models are now described as the web
+  chat model in its plain and thinking modes.
+
 ### Fixed
 
 - A streamed request whose parsing produced no text now delivers the

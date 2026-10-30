@@ -13,8 +13,9 @@ userToken. It is read from the ``Authorization: Bearer`` header (or
 request. The server stores no credential of its own; the ``DS_TOKEN``
 environment variable is accepted as a fallback for headless setups.
 
-Models: ``/v1/models`` advertises the two real engines,
-``deepseek-chat`` (V3) and ``deepseek-reasoner`` (R1). The legacy
+Models: ``/v1/models`` advertises the two modes of the DeepSeek web
+chat model (currently the V4 family): ``deepseek-chat`` with thinking
+off by default and ``deepseek-reasoner`` with thinking on. The legacy
 aliases ``deepseek-v3`` and ``deepseek-r1`` remain accepted in chat
 completions. Thinking and web search are controlled per request
 through the payload (see :meth:`ChatRequest.resolve_thinking`), with

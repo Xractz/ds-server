@@ -8,7 +8,8 @@ required.
 
 ds-server is built to be registered as an OpenAI-compatible provider in
 routers such as 9Router, so chat applications and agent frameworks can
-use DeepSeek V3 and R1 through the standard chat completions interface,
+use the DeepSeek web chat through the standard chat completions
+interface, in both its plain and thinking modes,
 including streaming and tool calling.
 
 > [!WARNING]
@@ -128,10 +129,11 @@ Set the `DS_DEVICE_ID` environment variable to pin a specific value.
 
 `GET /v1/models` advertises the two real engines:
 
-- `deepseek-chat`: DeepSeek V3 (thinking off by default)
-- `deepseek-reasoner`: DeepSeek R1 (thinking on by default; the
-  reasoning is returned as `reasoning_content`, matching the official
-  DeepSeek API)
+- `deepseek-chat`: the DeepSeek web chat model (currently the V4
+  family; thinking off by default)
+- `deepseek-reasoner`: the same web chat model with thinking on by
+  default; the reasoning is returned as `reasoning_content`, matching
+  the official DeepSeek API
 
 The legacy aliases `deepseek-v3` and `deepseek-r1` remain accepted in
 chat completions with identical behavior; they are simply no longer
