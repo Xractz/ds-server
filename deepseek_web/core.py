@@ -10,6 +10,9 @@ Components:
                    the DeepSeek userToken itself; the server keeps no
                    credential of its own.
     DeviceIdentity: resolves the per-installation device identifier.
+    RequestPacer:  process-wide pacing: completions are serialized and
+                   spaced, session creations are spaced, and transient
+                   upstream failures are retried with backoff.
     PowSolver:     solves the DeepSeekHashV1 proof-of-work challenge with
                    the official WebAssembly module shipped by DeepSeek.
     StreamParser:  incremental parser for the completion SSE stream.
@@ -24,8 +27,10 @@ import mimetypes
 import os
 import re
 import struct
+import threading
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -90,6 +95,96 @@ class DeviceIdentity:
         cls.DEVICE_ID_PATH.write_text(generated)
         cls.DEVICE_ID_PATH.chmod(0o600)
         return generated
+
+
+class RequestPacer:
+    """Process-wide pacing for upstream requests.
+
+    Bursts are the most visible signature of automation, so upstream
+    traffic is smoothed in two ways:
+
+    - Completions are serialized: one completion runs at a time and
+      concurrent client requests queue instead of bursting.
+    - Minimum intervals are enforced between completion starts and
+      between chat session creations.
+
+    Pacing is enabled by default and is shared by every client in the
+    process, however many client instances the server creates. The
+    intervals can be tuned with the ``DS_MIN_COMPLETION_INTERVAL`` and
+    ``DS_MIN_SESSION_INTERVAL`` environment variables (seconds), and
+    pacing can be disabled entirely with ``DS_PACING=0``.
+    """
+
+    DEFAULT_COMPLETION_INTERVAL = 0.4
+    DEFAULT_SESSION_INTERVAL = 1.0
+
+    def __init__(self, completion_interval=DEFAULT_COMPLETION_INTERVAL,
+                 session_interval=DEFAULT_SESSION_INTERVAL, enabled=True,
+                 clock=time.monotonic, sleep=time.sleep):
+        self._completion_interval = max(0.0, float(completion_interval))
+        self._session_interval = max(0.0, float(session_interval))
+        self._enabled = bool(enabled)
+        self._clock = clock
+        self._sleep = sleep
+        self._completion_lock = threading.Lock()
+        self._stamp_lock = threading.Lock()
+        self._last_completion_start = None
+        self._last_session_start = None
+
+    @classmethod
+    def from_env(cls):
+        """Build a pacer from the DS_PACING configuration variables."""
+        def _seconds(name, default):
+            try:
+                return float(os.environ[name])
+            except (KeyError, ValueError):
+                return default
+
+        return cls(
+            completion_interval=_seconds(
+                "DS_MIN_COMPLETION_INTERVAL",
+                cls.DEFAULT_COMPLETION_INTERVAL),
+            session_interval=_seconds(
+                "DS_MIN_SESSION_INTERVAL", cls.DEFAULT_SESSION_INTERVAL),
+            enabled=os.environ.get("DS_PACING", "1").strip().lower()
+            not in ("0", "false", "no", "off"),
+        )
+
+    def _wait_since(self, last, interval):
+        if not self._enabled or interval <= 0 or last is None:
+            return
+        remaining = interval - (self._clock() - last)
+        if remaining > 0:
+            self._sleep(remaining)
+
+    @contextmanager
+    def completion_slot(self):
+        """Run one completion at a time, spaced from the previous one."""
+        if not self._enabled:
+            yield
+            return
+        with self._completion_lock:
+            with self._stamp_lock:
+                last = self._last_completion_start
+            self._wait_since(last, self._completion_interval)
+            with self._stamp_lock:
+                self._last_completion_start = self._clock()
+            yield
+
+    def wait_for_session(self):
+        """Enforce the minimum interval before a session is created."""
+        if not self._enabled:
+            return
+        with self._stamp_lock:
+            last = self._last_session_start
+        self._wait_since(last, self._session_interval)
+        with self._stamp_lock:
+            self._last_session_start = self._clock()
+
+
+# One pacer for the whole process, configured from the environment at
+# import time and shared by every DeepSeekClient instance.
+SHARED_PACER = RequestPacer.from_env()
 
 
 class PowSolver:
@@ -317,12 +412,62 @@ class StreamParser:
 class DeepSeekClient:
     """Client for one DeepSeek account, identified by its token."""
 
-    def __init__(self, token, pow_solver=None, device_id=None):
+    def __init__(self, token, pow_solver=None, device_id=None,
+                 pacer=None):
         self._token = token
         self._pow = pow_solver or PowSolver()
         self._device_id = device_id or DeviceIdentity.resolve()
+        self._pacer = pacer or SHARED_PACER
 
     # -- request plumbing ----------------------------------------------
+
+    RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
+    MAX_RETRIES = 3
+
+    @staticmethod
+    def _retry_delay(attempt, response=None):
+        """Exponential backoff (1s, 2s, 4s), honoring Retry-After."""
+        delay = float(2 ** attempt)
+        if response is not None:
+            raw = response.headers.get("Retry-After")
+            if raw:
+                try:
+                    delay = max(delay, min(float(raw), 30.0))
+                except ValueError:
+                    pass
+        return delay
+
+    def _request(self, description, send):
+        """Execute one HTTP request, retrying transient failures.
+
+        ``send`` performs a single attempt and returns the response.
+        Rate limits (429), server errors (5xx), connection errors and
+        timeouts are retried with exponential backoff. Any other
+        response is returned to the caller for its own handling, so a
+        permanently failing request surfaces the usual error.
+        """
+        attempt = 0
+        while True:
+            try:
+                response = send()
+            except (requests.ConnectionError, requests.Timeout) as error:
+                if attempt >= self.MAX_RETRIES:
+                    raise DSError(
+                        f"{description}: connection failed after "
+                        f"{attempt + 1} attempts") from error
+                time.sleep(self._retry_delay(attempt))
+                attempt += 1
+                continue
+            if response.status_code not in self.RETRYABLE_STATUS \
+                    or attempt >= self.MAX_RETRIES:
+                return response
+            delay = self._retry_delay(attempt, response)
+            try:
+                response.close()
+            except Exception:
+                pass
+            time.sleep(delay)
+            attempt += 1
 
     def headers(self, referer="https://chat.deepseek.com/",
                 content_type="application/json"):
@@ -359,9 +504,11 @@ class DeepSeekClient:
     def _pow_headers(self, target_path):
         """Base headers extended with a solved proof-of-work response."""
         headers = self.headers()
-        response = requests.post(
-            API_BASE + "/chat/create_pow_challenge", headers=headers,
-            json={"target_path": target_path}, timeout=30)
+        response = self._request(
+            "create_pow_challenge",
+            lambda: requests.post(
+                API_BASE + "/chat/create_pow_challenge", headers=headers,
+                json={"target_path": target_path}, timeout=30))
         if response.status_code != 200:
             raise DSError("create_pow_challenge: "
                           f"HTTP {response.status_code}")
@@ -383,9 +530,11 @@ class DeepSeekClient:
 
     def _post(self, path, body, headers=None):
         """POST a JSON request and return the business payload."""
-        response = requests.post(
-            API_BASE + path, headers=headers or self.headers(),
-            json=body, timeout=30)
+        response = self._request(
+            path,
+            lambda: requests.post(
+                API_BASE + path, headers=headers or self.headers(),
+                json=body, timeout=30))
         if response.status_code != 200:
             raise DSError(f"{path}: HTTP {response.status_code}")
         payload = response.json()
@@ -399,6 +548,7 @@ class DeepSeekClient:
 
     def create_session(self):
         """Create a new chat session and return its identifier."""
+        self._pacer.wait_for_session()
         headers = self._pow_headers("/api/v0/chat/completion")
         data = self._post("/chat_session/create", {}, headers=headers)
         return data["chat_session"]["id"]
@@ -422,9 +572,11 @@ class DeepSeekClient:
 
         headers = self._pow_headers("/api/v0/file/upload_file")
         headers.pop("content-type", None)
-        response = requests.post(
-            API_BASE + "/file/upload_file", headers=headers,
-            files={"file": (filename, data, mime)}, timeout=120)
+        response = self._request(
+            f"upload {filename}",
+            lambda: requests.post(
+                API_BASE + "/file/upload_file", headers=headers,
+                files={"file": (filename, data, mime)}, timeout=120))
         if response.status_code != 200:
             raise DSError(f"upload {filename}: HTTP {response.status_code}")
         payload = response.json()
@@ -435,9 +587,12 @@ class DeepSeekClient:
 
         for _ in range(20):
             time.sleep(3)
-            status_response = requests.get(
-                API_BASE + "/file/fetch_files", headers=self.headers(),
-                params={"file_ids": file_id}, timeout=30)
+            status_response = self._request(
+                "fetch_files",
+                lambda: requests.get(
+                    API_BASE + "/file/fetch_files",
+                    headers=self.headers(),
+                    params={"file_ids": file_id}, timeout=30))
             try:
                 entry = status_response.json()["data"]["biz_data"] \
                     ["files"][0]
@@ -459,9 +614,12 @@ class DeepSeekClient:
         This is a fallback for cases where stream parsing yields an
         empty answer; the stored history is the authoritative record.
         """
-        response = requests.get(
-            API_BASE + "/chat/history_messages", headers=self.headers(),
-            params={"chat_session_id": session_id}, timeout=30)
+        response = self._request(
+            "history_messages",
+            lambda: requests.get(
+                API_BASE + "/chat/history_messages",
+                headers=self.headers(),
+                params={"chat_session_id": session_id}, timeout=30))
         if response.status_code != 200:
             return ""
         try:
@@ -486,7 +644,21 @@ class DeepSeekClient:
         ``on_token`` is invoked as ``on_token(kind, text)`` for every
         streamed fragment, where kind is ``"content"`` or ``"thinking"``.
         Returns a :class:`ChatResult`.
+
+        The call runs inside the shared pacer slot: completions are
+        serialized process-wide and spaced out, so concurrent clients
+        queue instead of bursting against the backend.
         """
+        with self._pacer.completion_slot():
+            return self._run_completion(
+                session_id, parent_id, prompt,
+                ref_file_ids=ref_file_ids, thinking=thinking,
+                search=search, model_type=model_type, on_token=on_token)
+
+    def _run_completion(self, session_id, parent_id, prompt,
+                        ref_file_ids=None, thinking=False, search=False,
+                        model_type="default", on_token=None):
+        """Execute one completion inside the pacer slot."""
         headers = self._pow_headers("/api/v0/chat/completion")
         headers["referer"] = \
             f"https://chat.deepseek.com/a/chat/s/{session_id}"
@@ -502,9 +674,11 @@ class DeepSeekClient:
             "action": None,
             "preempt": False,
         }
-        response = requests.post(API_BASE + "/chat/completion",
-                                 headers=headers, json=body,
-                                 timeout=300, stream=True)
+        response = self._request(
+            "completion",
+            lambda: requests.post(API_BASE + "/chat/completion",
+                                  headers=headers, json=body,
+                                  timeout=300, stream=True))
         if response.status_code != 200:
             raise DSError(f"completion: HTTP {response.status_code}")
         if "application/json" in response.headers.get("content-type", ""):

@@ -185,6 +185,21 @@ system prompt or first message) map to different chains and never mix.
 Chains persist across restarts in
 `~/.config/ds-server/sessions.json`.
 
+## Request pacing and retries
+
+Upstream traffic is paced to stay close to normal web usage. Completions
+are serialized (one runs at a time; concurrent client requests queue
+instead of bursting), completion starts are spaced by at least 0.4
+seconds, and new chat sessions by at least 1 second. Transient upstream
+failures (HTTP 429 and 5xx, connection errors, timeouts) are retried up
+to three times with exponential backoff (1s, 2s, 4s), honoring the
+`Retry-After` header when the backend sends one.
+
+The intervals can be tuned with the `DS_MIN_COMPLETION_INTERVAL` and
+`DS_MIN_SESSION_INTERVAL` environment variables (seconds), and pacing can
+be disabled entirely with `DS_PACING=0`. Disabling it is not recommended:
+bursts are the most visible signature of automation.
+
 ## Tool calling
 
 The DeepSeek web chat has no native function calling, so tool use is

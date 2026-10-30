@@ -188,6 +188,23 @@ pesan pertama berbeda) menjadi chain yang berbeda dan tidak pernah
 tercampur. Chain tersimpan melewati restart di
 `~/.config/ds-server/sessions.json`.
 
+## Pacing request dan retry
+
+Traffic ke upstream diatur ritmenya agar mendekati pemakaian web normal.
+Completion dijalankan satu per satu (request klien yang bersamaan akan
+mengantre, bukan meledak bersamaan), awal setiap completion berjarak
+minimal 0,4 detik, dan pembuatan sesi chat baru berjarak minimal 1
+detik. Kegagalan sementara dari upstream (HTTP 429 dan 5xx, error
+koneksi, timeout) di-retry sampai tiga kali dengan backoff eksponensial
+(1 detik, 2 detik, 4 detik), dan header `Retry-After` dari backend
+dihormati bila dikirim.
+
+Intervalnya dapat diatur melalui environment variable
+`DS_MIN_COMPLETION_INTERVAL` dan `DS_MIN_SESSION_INTERVAL` (dalam
+detik), dan pacing dapat dimatikan sepenuhnya dengan `DS_PACING=0`.
+Mematikannya tidak disarankan: ledakan request adalah tanda otomasi
+yang paling mudah terlihat.
+
 ## Tool calling
 
 DeepSeek web chat tidak memiliki function calling native, sehingga
