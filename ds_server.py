@@ -40,6 +40,7 @@ from deepseek_web import (ChainStore, DeepSeekClient, DSError,
                           MessageView, PromptBuilder, StreamCancelled,
                           StreamParser, TokenStore, ToolCatalog,
                           ToolCallParser, estimate_tokens)
+from deepseek_web import __version__
 
 MODELS = ["deepseek-chat", "deepseek-reasoner"]
 LEGACY_ALIASES = ("deepseek-v3", "deepseek-r1")
@@ -399,7 +400,7 @@ def create_app():
 
     @app.get("/health")
     def health():
-        return jsonify({"ok": True})
+        return jsonify({"ok": True, "version": __version__})
 
     @app.get("/v1/models")
     def list_models():
@@ -610,7 +611,8 @@ def main():
     parser.add_argument("--host", default="127.0.0.1")
     args = parser.parse_args()
 
-    print(f"ds-server running at http://{args.host}:{args.port}")
+    print(f"ds-server {__version__} running at "
+          f"http://{args.host}:{args.port}")
     print("OpenAI-compatible provider: base_url "
           f"http://{args.host}:{args.port}/v1")
     print("API key: the DeepSeek userToken (Authorization: Bearer).")
