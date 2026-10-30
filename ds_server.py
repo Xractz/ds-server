@@ -26,6 +26,9 @@ server maps one conversation to one DeepSeek session (see the
 continuing chains.
 """
 import json
+import os
+import queue
+import sys
 import threading
 import time
 import uuid
@@ -34,8 +37,9 @@ from dataclasses import dataclass
 from flask import Flask, Response, jsonify, request
 
 from deepseek_web import (ChainStore, DeepSeekClient, DSError,
-                          MessageView, PromptBuilder, TokenStore,
-                          ToolCatalog, ToolCallParser, estimate_tokens)
+                          MessageView, PromptBuilder, StreamCancelled,
+                          StreamParser, TokenStore, ToolCatalog,
+                          ToolCallParser, estimate_tokens)
 
 MODELS = ["deepseek-chat", "deepseek-reasoner"]
 LEGACY_ALIASES = ("deepseek-v3", "deepseek-r1")
@@ -49,8 +53,8 @@ def error_response(message, status=500, error_type="upstream_error",
                               "code": code}}), status
 
 
-def upstream_error_response(exc):
-    """Map a backend failure to a client-facing OpenAI-style error.
+def map_upstream_error(exc):
+    """Map a backend failure to (status, message, error_type, code).
 
     The upstream HTTP status carried by the DSError drives the mapping,
     so routers and agents above this server can react correctly instead
@@ -66,16 +70,44 @@ def upstream_error_response(exc):
     status = getattr(exc, "status", None)
     message = str(exc)
     if status == 429:
-        return error_response(message, 429, "rate_limit_error",
-                              "rate_limit_exceeded")
+        return 429, message, "rate_limit_error", "rate_limit_exceeded"
     if status in (401, 403):
-        return error_response(
-            "DeepSeek rejected the supplied userToken "
-            f"(HTTP {status}). Check that the token is valid.",
-            401, "authentication_error", "invalid_api_key")
+        return (401,
+                "DeepSeek rejected the supplied userToken "
+                f"(HTTP {status}). Check that the token is valid.",
+                "authentication_error", "invalid_api_key")
     if status is not None and 400 <= status < 500:
-        return error_response(message, status, "invalid_request_error")
-    return error_response(message, 502, "upstream_error")
+        return status, message, "invalid_request_error", None
+    return 502, message, "upstream_error", None
+
+
+def upstream_error_response(exc):
+    """Build the client-facing OpenAI-style error for a DSError."""
+    status, message, error_type, code = map_upstream_error(exc)
+    return error_response(message, status, error_type, code)
+
+
+class RequestLog:
+    """Optional one-line-per-completion logging, enabled with DS_LOG=1.
+
+    Lines go to stderr so they never mix with API responses. Each line
+    carries the model, the chain outcome (hit, new or reset), the wall
+    duration, how many upstream retries were performed, and the final
+    status of the request.
+    """
+
+    @staticmethod
+    def enabled():
+        return os.environ.get("DS_LOG", "").strip().lower() \
+            in ("1", "true", "yes", "on")
+
+    @classmethod
+    def completion(cls, model, chain, duration, retries, status):
+        if not cls.enabled():
+            return
+        print(f"[ds-server] completion model={model} chain={chain} "
+              f"duration={duration:.2f}s retries={retries} "
+              f"status={status}", file=sys.stderr, flush=True)
 
 
 class ChainLocks:
@@ -200,13 +232,24 @@ class CompletionService:
                     file_ids.append(client.upload_file(data, filename))
         return file_ids
 
-    def run(self, client, chat_request, key):
-        """Run one completion. Returns (answer_text, thinking_text)."""
+    def run(self, client, chat_request, key, on_token=None,
+            cancel_event=None):
+        """Run one completion.
+
+        Returns (answer_text, thinking_text, chain_status), where
+        chain_status is "hit" for a continued chain, "new" for a fresh
+        one, and "reset" when a chain had to be restarted. When
+        ``on_token`` is given it is forwarded to the client for true
+        streaming; ``cancel_event`` aborts the upstream read when set.
+        A StreamCancelled raised through the token callback is never
+        retried: the caller is gone.
+        """
         chains = self._chains
         tools = chat_request.tools if chat_request.parse_tools else []
         record = chains.get(key)
         continuation = chains.is_continuation(record,
                                               chat_request.messages)
+        chain_status = "hit" if continuation else "new"
 
         if continuation:
             session_id = record["ds_session"]
@@ -226,12 +269,14 @@ class CompletionService:
             session_id, parent, prompt, sent_messages = \
                 self._start_fresh(client, key, chat_request, tools)
             continuation = False
+            chain_status = "reset"
 
         file_ids = self._upload_images(client, sent_messages)
         try:
             result = client.chat_completion(
                 session_id, parent, prompt, file_ids,
-                thinking=chat_request.thinking, search=chat_request.search)
+                thinking=chat_request.thinking, search=chat_request.search,
+                on_token=on_token, cancel_event=cancel_event)
         except DSError:
             if not continuation:
                 raise
@@ -242,7 +287,9 @@ class CompletionService:
             file_ids = self._upload_images(client, chat_request.messages)
             result = client.chat_completion(
                 session_id, parent, prompt, file_ids,
-                thinking=chat_request.thinking, search=chat_request.search)
+                thinking=chat_request.thinking, search=chat_request.search,
+                on_token=on_token, cancel_event=cancel_event)
+            chain_status = "reset"
 
         answer = result.content
         if not answer:
@@ -259,7 +306,7 @@ class CompletionService:
             last_fp=chains.fingerprint(chat_request.messages[-1]),
             input_tokens=estimate_tokens(prompt),
             output_tokens=estimate_tokens(answer))
-        return answer, result.thinking
+        return answer, result.thinking, chain_status
 
 
 class ResponseFactory:
@@ -371,6 +418,106 @@ def create_app():
                         "note": "all chains have been reset; the next "
                                 "requests will create new DeepSeek sessions"})
 
+    def _stream_response(client, chat_request, key, started):
+        """Stream one completion live from the backend.
+
+        The completion runs on a worker thread and its tokens are
+        relayed through a queue as they arrive. If the client
+        disconnects, the response generator is closed by the server,
+        which sets the cancel event: the upstream read aborts and the
+        pacing slot is released instead of completing a reply nobody
+        is waiting for. Errors that occur before or during the stream
+        are reported as an error chunk inside the stream, since the
+        response has already begun.
+        """
+        tokens = queue.Queue()
+        cancel = threading.Event()
+        outcome = {}
+
+        def push(kind, text):
+            tokens.put((kind, text))
+
+        def produce():
+            try:
+                with locks.lock_for(key):
+                    outcome["result"] = service.run(
+                        client, chat_request, key, on_token=push,
+                        cancel_event=cancel)
+            except StreamCancelled:
+                outcome["cancelled"] = True
+            except Exception as exc:  # surfaced inside the stream
+                outcome["error"] = exc
+            finally:
+                tokens.put(None)
+
+        worker = threading.Thread(target=produce, daemon=True)
+        worker.start()
+
+        completion_id = "chatcmpl-" + uuid.uuid4().hex[:12]
+        model = chat_request.model
+
+        def generate():
+            status = "ok"
+            try:
+                yield ResponseFactory._chunk(
+                    completion_id, model,
+                    {"role": "assistant", "content": ""})
+                while True:
+                    item = tokens.get()
+                    if item is None:
+                        break
+                    kind, text = item
+                    delta = {"reasoning_content": text} \
+                        if kind == StreamParser.THINKING \
+                        else {"content": text}
+                    yield ResponseFactory._chunk(completion_id, model,
+                                                 delta)
+                if "error" in outcome:
+                    exc = outcome["error"]
+                    if isinstance(exc, DSError):
+                        _, message, error_type, code = \
+                            map_upstream_error(exc)
+                    else:
+                        message, error_type, code = \
+                            f"internal: {exc}", "internal_error", None
+                    status = "error"
+                    yield "data: " + json.dumps({"error": {
+                        "message": message, "type": error_type,
+                        "code": code}}) + "\n\n"
+                elif outcome.get("cancelled"):
+                    status = "cancelled"
+                else:
+                    answer, _thinking, chain_status = outcome["result"]
+                    outcome["chain"] = chain_status
+                    yield ResponseFactory._chunk(
+                        completion_id, model, {}, "stop")
+                    if chat_request.include_usage:
+                        prompt_tokens = estimate_tokens(
+                            PromptBuilder.full(chat_request.messages,
+                                               chat_request.tools))
+                        completion_tokens = estimate_tokens(answer)
+                        usage = {
+                            "prompt_tokens": prompt_tokens,
+                            "completion_tokens": completion_tokens,
+                            "total_tokens": prompt_tokens
+                            + completion_tokens}
+                        yield ResponseFactory._chunk(
+                            completion_id, model, {}, None, usage)
+                yield "data: [DONE]\n\n"
+            finally:
+                # On a normal completion the worker has already
+                # finished; if the consumer went away early, setting
+                # the event is what aborts the upstream read.
+                cancel.set()
+                worker.join(timeout=10)
+                if outcome.get("cancelled"):
+                    status = "cancelled"
+                RequestLog.completion(model, outcome.get("chain", "-"),
+                                      time.monotonic() - started,
+                                      client.retries, status)
+
+        return Response(generate(), mimetype="text/event-stream")
+
     @app.post("/v1/chat/completions")
     def chat_completions():
         body = request.get_json(force=True, silent=True)
@@ -391,16 +538,33 @@ def create_app():
         chat_request = ChatRequest.from_body(body)
         client = DeepSeekClient(token)
         key = chains.key_for(chat_request.messages, chat_request.model)
+        started = time.monotonic()
+
+        # True streaming requires that no tool parsing is needed: tool
+        # calls are parsed from the complete reply, so requests with
+        # tools keep the buffered path below.
+        if chat_request.stream and not chat_request.parse_tools:
+            return _stream_response(client, chat_request, key, started)
 
         with locks.lock_for(key):
             try:
-                full_text, thinking_text = service.run(
+                full_text, thinking_text, chain_status = service.run(
                     client, chat_request, key)
             except DSError as exc:
-                return upstream_error_response(exc)
+                response, status = upstream_error_response(exc)
+                RequestLog.completion(
+                    chat_request.model, "-", time.monotonic() - started,
+                    client.retries, f"error-{status}")
+                return response, status
             except Exception as exc:
+                RequestLog.completion(
+                    chat_request.model, "-", time.monotonic() - started,
+                    client.retries, "error-500")
                 return error_response(f"internal: {exc}", 500,
                                       "internal_error")
+        RequestLog.completion(chat_request.model, chain_status,
+                              time.monotonic() - started, client.retries,
+                              "ok")
 
         if chat_request.parse_tools:
             valid_names = {tool.name for tool in chat_request.tools}

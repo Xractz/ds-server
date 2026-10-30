@@ -5,6 +5,21 @@ All notable changes to ds-server are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- True streaming for plain streaming requests: tokens are relayed live
+  from the backend instead of being buffered and replayed. If the
+  client disconnects mid-stream, the upstream read is aborted and the
+  pacing slot is released immediately, instead of completing a reply
+  nobody is waiting for. Requests with tools still use the buffered
+  path, because tool calls are parsed from the complete reply.
+- Optional request logging with `DS_LOG=1`: one line per completion on
+  stderr carrying the model, the chain outcome (hit, new or reset),
+  the duration, the upstream retry count, and the final status (ok,
+  cancelled, or the mapped error status).
+
 ## [1.0.2] - 2026-10-30
 
 ### Fixed

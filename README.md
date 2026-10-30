@@ -200,6 +200,20 @@ The intervals can be tuned with the `DS_MIN_COMPLETION_INTERVAL` and
 be disabled entirely with `DS_PACING=0`. Disabling it is not recommended:
 bursts are the most visible signature of automation.
 
+## Streaming and logging
+
+Requests with `stream: true` are streamed live from the backend, token
+by token. If the client disconnects mid-stream, the upstream read is
+aborted and the pacing slot is released immediately, instead of
+completing a reply nobody is waiting for. Requests that use tools are
+the exception: tool calls are parsed from the complete reply, so those
+responses are buffered and then replayed as a stream.
+
+Set `DS_LOG=1` to log one line per completion to stderr: the model,
+the chain outcome (hit, new or reset), the duration, how many upstream
+retries were needed, and the final status (ok, cancelled, or the error
+status). Off by default.
+
 ## Tool calling
 
 The DeepSeek web chat has no native function calling, so tool use is

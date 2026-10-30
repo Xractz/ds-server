@@ -205,6 +205,20 @@ detik), dan pacing dapat dimatikan sepenuhnya dengan `DS_PACING=0`.
 Mematikannya tidak disarankan: ledakan request adalah tanda otomasi
 yang paling mudah terlihat.
 
+## Streaming dan logging
+
+Request dengan `stream: true` di-stream langsung dari backend, token
+demi token. Jika klien terputus di tengah stream, bacaan ke upstream
+dihentikan dan slot pacing langsung bebas, bukan menyelesaikan balasan
+yang sudah tidak ditunggu siapa pun. Request yang memakai tool adalah
+pengecualian: tool call di-parse dari balasan yang lengkap, jadi
+responsnya ditampung dulu lalu diputar sebagai stream.
+
+Set `DS_LOG=1` untuk mencatat satu baris per completion ke stderr:
+model, hasil chain (hit, new, atau reset), durasi, berapa retry
+upstream yang diperlukan, dan status akhir (ok, cancelled, atau status
+error). Mati secara bawaan.
+
 ## Tool calling
 
 DeepSeek web chat tidak memiliki function calling native, sehingga
