@@ -25,6 +25,7 @@ import base64
 import json
 import mimetypes
 import os
+import queue
 import re
 import struct
 import threading
@@ -447,6 +448,54 @@ class DeepSeekClient:
     RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
     MAX_RETRIES = 3
 
+    # How often the streaming read re-checks the cancel event while
+    # the upstream sends nothing. The read runs on a daemon thread
+    # feeding a queue, so a stalled upstream cannot block the check:
+    # the main loop wakes at least this often, sees the event, and
+    # aborts. Normal traffic is unaffected, since lines are forwarded
+    # as soon as they arrive.
+    STREAM_CANCEL_POLL_SECONDS = 2.0
+
+    @staticmethod
+    def _iter_lines_cancellable(response, cancel_event,
+                                poll_seconds=None):
+        """Yield SSE lines, re-checking ``cancel_event`` while stalled.
+
+        When no line arrives within ``poll_seconds``, the loop wakes,
+        checks the event, and either keeps waiting or raises
+        StreamCancelled. Reader errors are re-raised on the caller
+        thread. The reader thread is a daemon, so a stalled read can
+        never block process exit after the response is closed.
+        """
+        if poll_seconds is None:
+            poll_seconds = DeepSeekClient.STREAM_CANCEL_POLL_SECONDS
+        delivered = queue.Queue()
+
+        def feed():
+            try:
+                for line in response.iter_lines(decode_unicode=True):
+                    delivered.put(("line", line))
+            except Exception as error:
+                delivered.put(("error", error))
+            finally:
+                delivered.put(("end", None))
+
+        thread = threading.Thread(target=feed, daemon=True)
+        thread.start()
+        while True:
+            try:
+                kind, payload = delivered.get(timeout=poll_seconds)
+            except queue.Empty:
+                if cancel_event.is_set():
+                    raise StreamCancelled(
+                        "stream cancelled by the caller")
+                continue
+            if kind == "end":
+                return
+            if kind == "error":
+                raise payload
+            yield payload
+
     @staticmethod
     def _retry_delay(attempt, response=None):
         """Exponential backoff (1s, 2s, 4s), honoring Retry-After."""
@@ -702,7 +751,10 @@ class DeepSeekClient:
         upstream read is aborted, the connection is closed, and
         :class:`StreamCancelled` is raised, which releases the pacer
         slot immediately instead of letting the completion run to the
-        end for a caller that has already gone away.
+        end for a caller that has already gone away. The check also
+        runs while the upstream is fully stalled: the stream read
+        wakes at least every ``STREAM_CANCEL_POLL_SECONDS`` to test
+        the event, instead of waiting for the next SSE line.
         """
         with self._pacer.completion_slot():
             return self._run_completion(
@@ -754,8 +806,17 @@ class DeepSeekClient:
         debug = bool(os.environ.get("DS_DEBUG"))
         debug_lines = []
 
+        # Without a cancel event the plain iterator is kept, so the
+        # normal path is byte-for-byte unchanged. With one, the
+        # polling reader guarantees the cancel check runs even when
+        # the upstream sends nothing for a long time.
+        if cancel_event is not None:
+            lines = self._iter_lines_cancellable(response, cancel_event)
+        else:
+            lines = response.iter_lines(decode_unicode=True)
+
         try:
-            for line in response.iter_lines(decode_unicode=True):
+            for line in lines:
                 if cancel_event is not None and cancel_event.is_set():
                     raise StreamCancelled(
                         "stream cancelled by the caller")

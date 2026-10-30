@@ -185,5 +185,86 @@ class TrimCodeBlocksTest(unittest.TestCase):
         self.assertNotIn("line15", text)
 
 
+class StalledStreamResponse:
+    """An SSE response that answers once and then stalls.
+
+    After the first fragment the iterator sleeps for a minute, far
+    longer than any cancel poll interval. It runs on the reader
+    thread, which is a daemon, so the stall never blocks test exit.
+    """
+
+    def __init__(self):
+        self.status_code = 200
+        self.headers = {"content-type": "text/event-stream"}
+        self.closed = False
+
+    def iter_lines(self, decode_unicode=True):
+        yield 'data: {"request_message_id": 11, "response_message_id": 12}'
+        event = {"v": {"response": {"fragments": [
+            {"id": 1, "type": "RESPONSE", "content": "hello"}]}}}
+        yield "data: " + json.dumps(event)
+        time.sleep(60)
+        yield "data: [DONE]"
+
+    def close(self):
+        self.closed = True
+
+
+class FailingStreamResponse:
+    """An SSE response whose read fails after the first fragment."""
+
+    def __init__(self):
+        self.status_code = 200
+        self.headers = {"content-type": "text/event-stream"}
+        self.closed = False
+
+    def iter_lines(self, decode_unicode=True):
+        yield 'data: {"request_message_id": 11, "response_message_id": 12}'
+        raise ValueError("read broke")
+
+    def close(self):
+        self.closed = True
+
+
+class StalledStreamCancelTest(unittest.TestCase):
+    def _run(self, response, cancel):
+        client = DeepSeekClient("test-token",
+                                pacer=RequestPacer(enabled=False))
+        client._pow_headers = lambda target: {}
+        with mock.patch.object(core.requests, "post",
+                               return_value=response):
+            return client.chat_completion(
+                "session-1", None, "prompt",
+                on_token=lambda kind, text: None,
+                cancel_event=cancel)
+
+    def test_cancel_aborts_a_fully_stalled_stream(self):
+        response = StalledStreamResponse()
+        cancel = threading.Event()
+
+        def set_cancel_later():
+            time.sleep(0.2)
+            cancel.set()
+
+        setter = threading.Thread(target=set_cancel_later)
+        setter.start()
+        started = time.monotonic()
+        with self.assertRaises(StreamCancelled):
+            self._run(response, cancel)
+        elapsed = time.monotonic() - started
+        setter.join(5)
+        self.assertTrue(response.closed)
+        # The stall lasts 60s; cancellation must land within one
+        # poll interval plus scheduling slack, not after the stall.
+        self.assertLess(elapsed, 5.0)
+
+    def test_reader_error_reaches_the_caller(self):
+        response = FailingStreamResponse()
+        cancel = threading.Event()
+        with self.assertRaises(ValueError):
+            self._run(response, cancel)
+        self.assertTrue(response.closed)
+
+
 if __name__ == "__main__":
     unittest.main()
