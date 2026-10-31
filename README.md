@@ -230,6 +230,37 @@ the end.
   - Native web search via `search_enabled: true` in the request body
 - `POST /v1/sessions/new`: reset all session chains
 
+## Configuration
+
+Every setting is an environment variable; the server reads the
+process environment and loads no file by itself. The repository
+ships `.env.example` with the full list. Nothing is required: with
+no variables set, the defaults below apply.
+
+- `DS_TOKEN`: fallback userToken for requests that present no API
+  key. Default: none, so a keyless request gets a 401.
+- `DS_HISTORY_MODE`: authoritative history mode for every request
+  (see History mode). One of `1`, `true`, `yes`, `on` enables it.
+  Default: off.
+- `DS_DELETE_SESSIONS`: delete retired backend sessions (see
+  Sessions). Same enabling values. Default: off.
+- `DS_LOG`: one log line per completion on stderr (see Streaming
+  and logging). Same enabling values. Default: off.
+- `DS_PACING`: request pacing. Default: on; `0`, `false`, `no`, or
+  `off` disables it, and any other value leaves it on.
+- `DS_MIN_COMPLETION_INTERVAL`: minimum seconds between completion
+  starts. A non-numeric value falls back to the default. Default:
+  0.4.
+- `DS_MIN_SESSION_INTERVAL`: minimum seconds between new session
+  creations. Same fallback. Default: 1.0.
+- `DS_ADAPTIVE_PACING`: widen the pacing intervals after a retried
+  429. Default: on; disabled by the same values as `DS_PACING`.
+- `DS_DEVICE_ID`: device identifier presented to the backend.
+  Default: the UUID stored in `~/.config/ds-server/device_id`,
+  generated randomly on first run and kept across restarts.
+- `DS_DEBUG`: extra debug output for upstream failures. Any
+  non-empty value enables it, including `0`. Default: off.
+
 ## Sessions
 
 OpenAI clients resend the full conversation history with every

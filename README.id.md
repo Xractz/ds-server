@@ -234,6 +234,40 @@ baru diketahui di akhir.
   - Web search native melalui `search_enabled: true` di body request
 - `POST /v1/sessions/new`: reset semua chain sesi
 
+## Konfigurasi
+
+Semua pengaturan berupa environment variable; server membaca
+environment proses dan tidak memuat file apa pun sendiri. Repo ini
+menyertakan `.env.example` dengan daftar lengkapnya. Tidak ada yang
+wajib diisi: tanpa variabel apa pun, nilai bawaan di bawah ini yang
+berlaku.
+
+- `DS_TOKEN`: userToken cadangan untuk request yang tidak membawa
+  API key. Bawaan: tidak ada, jadi request tanpa key kena 401.
+- `DS_HISTORY_MODE`: mode history otoritatif untuk semua request
+  (lihat Mode history). Nilai `1`, `true`, `yes`, `on` yang
+  menyalakannya. Bawaan: mati.
+- `DS_DELETE_SESSIONS`: hapus sesi backend yang pensiun (lihat
+  Sesi). Nilai penyala yang sama. Bawaan: mati.
+- `DS_LOG`: satu baris log per completion di stderr (lihat
+  Streaming dan logging). Nilai penyala yang sama. Bawaan: mati.
+- `DS_PACING`: pacing request. Bawaan: menyala; nilai `0`, `false`,
+  `no`, atau `off` yang mematikannya, dan nilai lain apa pun
+  membiarkannya menyala.
+- `DS_MIN_COMPLETION_INTERVAL`: detik minimum antar awal
+  completion. Nilai bukan angka kembali ke bawaan. Bawaan: 0.4.
+- `DS_MIN_SESSION_INTERVAL`: detik minimum antar pembuatan sesi
+  baru. Fallback yang sama. Bawaan: 1.0.
+- `DS_ADAPTIVE_PACING`: lebarkan interval pacing setelah 429 yang
+  di-retry. Bawaan: menyala; dimatikan oleh nilai yang sama seperti
+  `DS_PACING`.
+- `DS_DEVICE_ID`: pengenal perangkat yang ditunjukkan ke backend.
+  Bawaan: UUID yang tersimpan di `~/.config/ds-server/device_id`,
+  dibuat acak saat pertama jalan dan dipertahankan melewati
+  restart.
+- `DS_DEBUG`: output debug tambahan untuk kegagalan upstream. Nilai
+  tidak kosong apa pun menyalakannya, termasuk `0`. Bawaan: mati.
+
 ## Sesi
 
 Klien OpenAI selalu mengirim ulang seluruh riwayat percakapan pada
