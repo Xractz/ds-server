@@ -35,6 +35,7 @@ import time
 import uuid
 from dataclasses import dataclass
 
+import requests
 from flask import Flask, Response, jsonify, request
 
 from deepseek_web import (ChainStore, DeepSeekClient, DSError,
@@ -44,6 +45,7 @@ from deepseek_web import (ChainStore, DeepSeekClient, DSError,
 from deepseek_web import __version__
 
 MODELS = ["deepseek-chat", "deepseek-reasoner"]
+MAX_REMOTE_IMAGE_BYTES = 10 * 1024 * 1024
 
 
 def model_entry(model_id):
@@ -335,12 +337,37 @@ class CompletionService:
         return session_id, None, prompt, chat_request.messages
 
     @staticmethod
-    def _upload_images(client, messages):
+    def _fetch_remote_image(url):
+        """Download a remote image for upload; None when unusable."""
+        try:
+            response = requests.get(
+                url, timeout=15, headers={"User-Agent": "ds-server"})
+            if response.status_code != 200:
+                return None
+            data = response.content
+        except Exception:
+            return None
+        if not data or len(data) > MAX_REMOTE_IMAGE_BYTES:
+            return None
+        mime = (response.headers.get("Content-Type") or "image/png")
+        mime = mime.split(";")[0].strip() or "image/png"
+        extension = mime.split("/")[1] if "/" in mime else "png"
+        return data, f"image.{extension}", mime
+
+    @staticmethod
+    def _upload_attachments(client, messages):
         file_ids = []
         for message in messages:
-            if message.get("role") == "user":
-                for data, filename, _mime in MessageView.images(message):
-                    file_ids.append(client.upload_file(data, filename))
+            if message.get("role") != "user":
+                continue
+            attachments = list(MessageView.images(message))
+            attachments.extend(MessageView.files(message))
+            for url in MessageView.image_urls(message):
+                fetched = CompletionService._fetch_remote_image(url)
+                if fetched is not None:
+                    attachments.append(fetched)
+            for data, filename, _mime in attachments:
+                file_ids.append(client.upload_file(data, filename))
         return file_ids
 
     @staticmethod
@@ -422,7 +449,7 @@ class CompletionService:
             continuation = False
             chain_status = "reset"
 
-        file_ids = self._upload_images(client, sent_messages)
+        file_ids = self._upload_attachments(client, sent_messages)
         try:
             result = client.chat_completion(
                 session_id, parent, prompt, file_ids,
@@ -435,7 +462,7 @@ class CompletionService:
             # render in full, and retry once.
             session_id, parent, prompt, sent_messages = \
                 self._start_fresh(client, key, chat_request, tools)
-            file_ids = self._upload_images(client, chat_request.messages)
+            file_ids = self._upload_attachments(client, chat_request.messages)
             result = client.chat_completion(
                 session_id, parent, prompt, file_ids,
                 thinking=chat_request.thinking, search=chat_request.search,
@@ -453,7 +480,7 @@ class CompletionService:
             # once on a fresh session before returning it.
             session_id, parent, prompt, sent_messages = \
                 self._start_fresh(client, key, chat_request, tools)
-            file_ids = self._upload_images(client, chat_request.messages)
+            file_ids = self._upload_attachments(client, chat_request.messages)
             result = client.chat_completion(
                 session_id, parent, prompt, file_ids,
                 thinking=chat_request.thinking, search=chat_request.search,
