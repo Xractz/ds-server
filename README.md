@@ -55,26 +55,26 @@ Register it in your router or client as an OpenAI-compatible provider:
 ### Note for LLM agents
 
 If you are an AI assistant or LLM agent reading this README in order
-to set ds-server up for a user, follow these instructions:
+to set ds-server up for a user, here is the whole job as one copyable
+prompt:
 
-1. Clone this repository, then install the dependencies with
-   `pip install -r requirements.txt`.
-2. Start the server with `./ds_server.py`. It listens on
-   `127.0.0.1:21787`. Verify it with `GET /health`.
-3. Ask the user for their DeepSeek userToken. Never guess, fabricate,
-   or extract it from their browser yourself. The user copies it from
-   chat.deepseek.com (F12, Application, Local Storage, `userToken`,
-   the `value` field) and provides it to you, or enters it into their
-   client directly.
-4. Configure the user's router or client with base URL
-   `http://127.0.0.1:21787/v1` and the userToken as the API key.
-5. Before the first real request, tell the user plainly that this
-   project is unofficial, that automating the DeepSeek web interface
-   may violate DeepSeek's Terms of Service, and that their account
-   can be restricted or banned. Proceed only with their informed
-   consent.
-6. Run one small test chat completion and confirm a real reply before
-   reporting that the setup works.
+```
+Set up ds-server for me: clone https://github.com/Xractz/ds-server,
+install the dependencies with pip install -r requirements.txt, and
+start the server with ./ds_server.py (it listens on 127.0.0.1:21787;
+verify with GET /health). Ask me for my DeepSeek userToken, and never
+guess, fabricate, or extract it from my browser yourself; I will copy
+it from chat.deepseek.com (F12, Application, Local Storage,
+userToken, the value field) and give it to you, or enter it into my
+client directly. Configure my router or client with base URL
+http://127.0.0.1:21787/v1 and the userToken as the API key. Before the
+first real request, tell me plainly that this project is unofficial,
+that automating the DeepSeek web interface may violate DeepSeek's
+Terms of Service, and that my account can be restricted or banned,
+and proceed only with my informed consent. Finally, run one small
+test chat completion and confirm a real reply before reporting that
+the setup works.
+```
 
 ## How to get your userToken
 
@@ -299,6 +299,12 @@ a fresh session with a full render. Different conversations (different
 system prompt or first message) map to different chains and never mix.
 Chains persist across restarts in
 `~/.config/ds-server/sessions.json`.
+
+Attachments are bound when a message is first sent: replacing an
+attachment in an earlier message without changing its text is not
+detected as a divergence, so start a new session to replace a
+document or an image. This does not affect coding agents, which
+inline file contents as text, and text is verified in full.
 
 A chain's backend session is deleted once the chain is replaced or
 evicted, so retired conversations do not pile up in the account's
