@@ -18,7 +18,9 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from deepseek_web.core import ChatResult, DeepSeekClientfrom deepseek_web.sessions import ChainStore
+import deepseek_web
+from deepseek_web.core import ChatResult, DeepSeekClient
+from deepseek_web.sessions import ChainStore
 from deepseek_web.tools import PromptBuilder
 
 try:
