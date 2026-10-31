@@ -44,30 +44,12 @@ from deepseek_web import (ChainStore, DeepSeekClient, DSError,
 from deepseek_web import __version__
 
 MODELS = ["deepseek-chat", "deepseek-reasoner"]
-# What each model can actually do through the web backend, declared on
-# /v1/models so routers and clients do not have to guess capabilities
-# from the model name. deepseek-chat is the plain mode of the web chat
-# model: it reads images (uploads) and supports the emulated tool
-# calling and the backend's native search, but it does not reason.
-# deepseek-reasoner is the thinking mode, so it declares reasoning as
-# well. (A client can still ask deepseek-chat to think through the
-# payload; the declaration follows each model's own mode.)
-MODEL_CAPABILITIES = {
-    "deepseek-chat": {"vision": True, "reasoning": False,
-                      "tools": True, "search": True},
-    "deepseek-reasoner": {"vision": True, "reasoning": True,
-                          "tools": True, "search": True},
-}
 
 
 def model_entry(model_id):
-    """One /v1/models entry, with capability metadata."""
-    caps = MODEL_CAPABILITIES[model_id]
+    """One /v1/models entry."""
     return {"id": model_id, "object": "model", "created": 1700000000,
-            "owned_by": "deepseek", "capabilities": caps,
-            "architecture": {
-                "input_modalities": ["text", "image"],
-                "output_modalities": ["text"]}}
+            "owned_by": "deepseek"}
 REASONER_MODELS = {"deepseek-reasoner"}
 
 

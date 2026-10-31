@@ -140,11 +140,6 @@ environment variable `DS_DEVICE_ID` untuk menetapkan nilai tertentu.
 Hanya dua nama model ini yang dilayani; nama model lain ditolak
 dengan error `model_not_found`.
 
-Setiap entri juga mendeklarasikan kemampuan modelnya (`vision`,
-`reasoning`, `tools`, `search`) beserta modalitas input dan outputnya,
-jadi router dan klien bisa menampilkan dan mengarahkan berdasarkan
-itu, bukan menebak dari nama model.
-
 ### Thinking dan search dikontrol dari payload
 
 Nama model hanya menentukan nilai bawaan. Parameter payload selalu

@@ -410,24 +410,19 @@ class HealthVersionTest(unittest.TestCase):
 
 @unittest.skipUnless(HAS_SERVER, "ds_server dependencies not installed")
 class ModelsMetadataTest(unittest.TestCase):
-    """The /v1/models listing declares real capabilities."""
+    """The /v1/models listing serves exactly the two models."""
 
     def setUp(self):
         self.client = ds_server.create_app().test_client()
 
-    def test_listing_declares_vision_and_reasoning(self):
+    def test_listing_has_plain_entries(self):
         body = self.client.get("/v1/models").get_json()
         entries = {entry["id"]: entry for entry in body["data"]}
         self.assertEqual(set(entries),
                          {"deepseek-chat", "deepseek-reasoner"})
         for entry in entries.values():
-            self.assertTrue(entry["capabilities"]["vision"])
-            self.assertIn("image",
-                          entry["architecture"]["input_modalities"])
-        chat = entries["deepseek-chat"]["capabilities"]
-        reasoner = entries["deepseek-reasoner"]["capabilities"]
-        self.assertFalse(chat["reasoning"])
-        self.assertTrue(reasoner["reasoning"])
+            self.assertNotIn("capabilities", entry)
+            self.assertNotIn("architecture", entry)
 
     def test_removed_aliases_are_not_served(self):
         for alias in ("deepseek-v3", "deepseek-r1"):

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- The `capabilities` and `architecture` metadata on `/v1/models`
+  entries is gone. It was added in 1.1.1, but the router this bridge
+  serves does not read capability metadata from a provider's model
+  list, so the declaration had no consumer.
+
 ## [1.1.1] - 2026-10-31
 
 ### Added

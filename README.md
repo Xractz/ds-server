@@ -138,11 +138,6 @@ Set the `DS_DEVICE_ID` environment variable to pin a specific value.
 Only these two model names are served; any other model name is
 rejected with a `model_not_found` error.
 
-Each entry also declares the model's capabilities (`vision`,
-`reasoning`, `tools`, `search`) and its input and output modalities,
-so routers and clients can display and route on them instead of
-guessing from the model name.
-
 ### Thinking and search are payload-controlled
 
 The model name only sets the default. Payload parameters always win:
