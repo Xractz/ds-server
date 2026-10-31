@@ -59,14 +59,29 @@ class ChainStore:
 
     @staticmethod
     def is_continuation(record, messages):
-        """Whether ``messages`` exactly extends the recorded chain."""
+        """Whether ``messages`` exactly extends the recorded chain.
+
+        The whole recorded prefix is verified, not only the boundary
+        message: an edit anywhere in the recorded history (an edit, a
+        rollback, a head-preserving compaction) must reset the chain,
+        because the backend would otherwise keep answering from the
+        pre-edit context. Records written before prefix fingerprints
+        existed carry no ``prefix`` and never continue; they reset
+        once and are rewritten in the new shape.
+        """
         if not record or not record.get("count"):
             return False
         count = record["count"]
         if len(messages) <= count:
             return False
-        return ChainStore.fingerprint(messages[count - 1]) \
-            == record.get("last_fp", "")
+        if ChainStore.fingerprint(messages[count - 1]) \
+                != record.get("last_fp", ""):
+            return False
+        prefix = record.get("prefix")
+        if prefix is None or len(prefix) != count:
+            return False
+        return all(ChainStore.fingerprint(message) == stored
+                   for message, stored in zip(messages, prefix))
 
     # -- persistence ---------------------------------------------------------
 
@@ -105,6 +120,7 @@ class ChainStore:
             "parent": None,
             "count": 0,
             "last_fp": "",
+            "prefix": [],
             "model": model,
             "last_used": int(time.time()),
             "total_input": 0,
@@ -133,7 +149,7 @@ class ChainStore:
         return retired
 
     def update(self, key, parent=None, count=None, last_fp=None,
-               input_tokens=0, output_tokens=0):
+               prefix=None, input_tokens=0, output_tokens=0):
         """Advance a chain record after a successful completion."""
         data = self._load()
         record = data["chains"].get(key)
@@ -145,6 +161,8 @@ class ChainStore:
             record["count"] = count
         if last_fp is not None:
             record["last_fp"] = last_fp
+        if prefix is not None:
+            record["prefix"] = list(prefix)
         record["last_used"] = int(time.time())
         record["total_input"] = record.get("total_input", 0) + input_tokens
         record["total_output"] = record.get("total_output", 0) \
