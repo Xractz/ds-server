@@ -34,6 +34,7 @@ class ChainStore:
     """Persistent store of conversation chains."""
 
     def __init__(self, path=DEFAULT_PATH, max_entries=50):
+        self._retired = []
         self._path = Path(path)
         self._max_entries = max_entries
 
@@ -95,6 +96,10 @@ class ChainStore:
         """Create or replace a chain record bound to a DeepSeek session."""
         data = self._load()
         chains = data["chains"]
+        previous = chains.get(key)
+        if previous is not None \
+                and previous.get("ds_session") not in (None, ds_session):
+            self._retired.append(previous["ds_session"])
         chains[key] = {
             "ds_session": ds_session,
             "parent": None,
@@ -110,9 +115,22 @@ class ChainStore:
                             key=lambda item: item[1].get("last_used", 0))
             for old_key, _record in oldest[:len(chains)
                                             - self._max_entries]:
+                if _record.get("ds_session"):
+                    self._retired.append(_record["ds_session"])
                 del chains[old_key]
         self._save(data)
         return chains[key]
+
+    def drain_retired(self):
+        """Return the session ids retired since the last drain.
+
+        A session retires when its chain record is replaced by a
+        fresh session or evicted by the LRU trim. The caller decides
+        what to do with them (the completion service deletes them on
+        the backend when session auto-delete is enabled).
+        """
+        retired, self._retired = self._retired, []
+        return retired
 
     def update(self, key, parent=None, count=None, last_fp=None,
                input_tokens=0, output_tokens=0):

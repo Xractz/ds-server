@@ -728,6 +728,18 @@ class DeepSeekClient:
         data = self._post("/chat_session/create", {}, headers=headers)
         return data["chat_session"]["id"]
 
+    def delete_session(self, session_id):
+        """Delete a chat session on the backend.
+
+        The identifier field is ``chat_session_id``; the endpoint
+        silently accepts and ignores a ``session_id`` field instead,
+        which deletes nothing (verified live 2026-10-31: only the
+        ``chat_session_id`` form removes the session from the list
+        and empties its history).
+        """
+        self._post("/chat_session/delete",
+                   {"chat_session_id": session_id})
+
     # -- files -----------------------------------------------------------
 
     def upload_file(self, source, filename=None):
