@@ -335,8 +335,8 @@ class StreamParser:
     registered fragment. Fragment updates may also arrive as lists
     appended or batched at the response level itself, rather than
     under ``response/fragments``. Structural citation markers of the
-    form ``[reference:N]`` that arrive as standalone chunks are
-    filtered out of every channel.
+    forms ``[reference:N]`` and ``[citation:N]`` that arrive as
+    standalone chunks are filtered out of every channel.
     """
 
     CONTENT = "content"
@@ -374,7 +374,8 @@ class StreamParser:
         # A standalone citation marker is structure, not text, in
         # every channel: it arrives as its own chunk from fragment
         # appends, batch updates, and fragment snapshots alike.
-        if re.fullmatch(r"\[reference:\d+\]", text.strip()):
+        if re.fullmatch(r"\[(?:reference|citation):\d+\]",
+                        text.strip()):
             return
         if kind == self.THINKING:
             self._thinking_parts.append(text)

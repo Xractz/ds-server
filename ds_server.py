@@ -29,6 +29,7 @@ continuing chains.
 import json
 import os
 import queue
+import re
 import sys
 import threading
 import time
@@ -46,6 +47,7 @@ from deepseek_web import __version__
 
 MODELS = ["deepseek-chat", "deepseek-reasoner"]
 MAX_REMOTE_IMAGE_BYTES = 10 * 1024 * 1024
+_CITATION_MARKER = re.compile(r"\[(?:reference|citation):\d+\]")
 
 
 def model_entry(model_id):
@@ -406,6 +408,11 @@ class CompletionService:
                 history = ""
             if history:
                 answer = history
+        # Search citation markers are structure, not text, on every
+        # answer path: the stream parser only catches the ones that
+        # arrive as standalone chunks, and stored history is verbatim.
+        if answer:
+            answer = _CITATION_MARKER.sub("", answer)
         return answer
 
     def run(self, client, chat_request, key, on_token=None,
@@ -477,7 +484,9 @@ class CompletionService:
             # reply at all (observed under the tool-catalog prompt,
             # with the stored history empty as well). An empty 200 is
             # the worst possible answer for an agent loop, so retry
-            # once on a fresh session before returning it.
+            # once on a fresh session before returning it. The chain
+            # outcome label is deliberately left alone: the
+            # conversation itself did not diverge.
             session_id, parent, prompt, sent_messages = \
                 self._start_fresh(client, key, chat_request, tools)
             file_ids = self._upload_attachments(client, chat_request.messages)
@@ -487,8 +496,17 @@ class CompletionService:
                 on_token=on_token, cancel_event=cancel_event)
             answer = self._resolve_answer(client, session_id, result,
                                           chat_request, on_token)
-            if continuation:
-                chain_status = "reset"
+
+        if not answer:
+            # Still empty after the fresh-session retry. Empties
+            # cluster, so another immediate in-server retry would
+            # likely fail the same way; surface a retryable error
+            # instead of an empty 200 and let the client's own retry
+            # policy take over, which also spaces the next attempt
+            # out of the cluster.
+            raise DSError(
+                "the DeepSeek web backend returned an empty reply "
+                "twice; retry the request", status=502)
 
         chains.update(
             key, parent=result.response_id,
