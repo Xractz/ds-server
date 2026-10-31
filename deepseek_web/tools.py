@@ -144,6 +144,8 @@ class MessageView:
                         parts.append(block.get("text", ""))
                     elif block.get("type") == "image_url":
                         parts.append("[Image attached]")
+                    elif block.get("type") == "file":
+                        parts.append("[File attached]")
                 elif isinstance(block, str):
                     parts.append(block)
             return "\n".join(part for part in parts if part)
@@ -172,6 +174,59 @@ class MessageView:
                                       f"image.{extension}", mime))
                     except Exception:
                         continue
+        return found
+
+    @staticmethod
+    def image_urls(message):
+        """Remote http(s) URLs of ``image_url`` parts (not data URLs)."""
+        found = []
+        content = message.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict) \
+                        or block.get("type") != "image_url":
+                    continue
+                url = (block.get("image_url") or {}).get("url", "")
+                if url.startswith(("http://", "https://")):
+                    found.append(url)
+        return found
+
+    @staticmethod
+    def files(message):
+        """Decoded ``file`` parts as (bytes, filename, mime).
+
+        Accepts the chat-completions shape (a nested ``file`` object
+        with ``file_data`` and ``filename``) and the flat variant with
+        those keys on the part itself. ``file_data`` may be a data
+        URL or bare base64.
+        """
+        found = []
+        content = message.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict) \
+                        or block.get("type") != "file":
+                    continue
+                source = block.get("file")
+                if not isinstance(source, dict):
+                    source = block
+                file_data = source.get("file_data") \
+                    or block.get("file_data") or ""
+                filename = source.get("filename") \
+                    or block.get("filename") or "file"
+                mime = "application/octet-stream"
+                encoded = file_data
+                if file_data.startswith("data:") and "," in file_data:
+                    header, encoded = file_data.split(",", 1)
+                    mime = header.split(";")[0].split(":", 1)[-1] or mime
+                if not encoded:
+                    continue
+                try:
+                    data = base64.b64decode(encoded, validate=True)
+                except Exception:
+                    continue
+                if data:
+                    found.append((data, filename, mime))
         return found
 
     @classmethod
