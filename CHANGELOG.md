@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `response_format` is honored at prompt level: `json_object`
+  instructs the model to answer with a single JSON object, and
+  `json_schema` carries the client's schema along with the
+  instruction. The web backend cannot enforce a format at decode
+  time, so conformance rests on the model following the instruction.
+- Opt-in authoritative history mode: `history_mode: true` in the
+  request body (or `DS_HISTORY_MODE=1` as the default) makes the
+  reply stored in the backend's history the answer of record, read
+  back after the completion instead of the assembled stream text.
+  Streamed requests are buffered in this mode.
+- Opt-in upstream session auto-delete (`DS_DELETE_SESSIONS=1`): a
+  chain's backend session is deleted once the chain is replaced or
+  evicted, so retired conversations do not pile up in the account's
+  chat list.
+- `GET /stats`: in-process completion counters (totals by outcome,
+  chain outcomes, estimated token totals, and a per-model breakdown
+  with retries and durations). Always on, memory only.
+
 ## [1.1.2] - 2026-10-31
 
 ### Changed

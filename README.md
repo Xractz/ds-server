@@ -189,9 +189,33 @@ like the reasoner, and `deepseek-reasoner` with
 web backend is a binary switch, so every effort level above none maps
 to on.
 
+### Response format
+
+`response_format` is honored at prompt level. Send
+`{"type": "json_object"}` and the model is instructed to answer with
+a single valid JSON object and nothing else. Send
+`{"type": "json_schema", "json_schema": {"schema": {...}}}` and the
+schema travels with the instruction. The web backend cannot enforce
+a format while decoding, so a non-conforming reply is possible in
+principle; in practice the current web model follows the instruction
+reliably. Combining `response_format` with tool calling is not
+recommended, because the two output contracts compete.
+
+### History mode
+
+With `history_mode: true` in the request body (or `DS_HISTORY_MODE=1`
+as the default for every request), the answer of record is the reply
+stored in the backend's history, read back after the completion
+instead of the text assembled from the stream. Use it when stream
+assembly fidelity matters more than latency: it costs one extra
+history fetch per request, and streamed requests are buffered rather
+than streamed live, because the authoritative text is only known at
+the end.
+
 ## Endpoints
 
 - `GET /health`
+- `GET /stats`: completion counters since process start
 - `GET /v1/models`
 - `GET /v1/models/<id>`
 - `POST /v1/chat/completions`, full OpenAI format:
@@ -217,6 +241,11 @@ a fresh session with a full render. Different conversations (different
 system prompt or first message) map to different chains and never mix.
 Chains persist across restarts in
 `~/.config/ds-server/sessions.json`.
+
+Set `DS_DELETE_SESSIONS=1` to delete a chain's backend session once
+the chain is replaced or evicted, so retired conversations do not pile
+up in the account's chat list. Deletion is best effort and happens
+after the request that retired the chain completes.
 
 ## Request pacing and retries
 
@@ -254,6 +283,11 @@ Set `DS_LOG=1` to log one line per completion to stderr: the model,
 the chain outcome (hit, new or reset), the duration, how many upstream
 retries were needed, and the final status (ok, cancelled, or the error
 status). Off by default.
+
+`GET /stats` serves the same events as counters: totals by outcome
+(ok, cancelled, errors), chain outcomes, estimated token totals, and
+a per-model breakdown with retries and total duration. The counters
+are always on, live in memory only, and reset on restart.
 
 ## Tool calling
 
