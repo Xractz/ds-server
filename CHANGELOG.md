@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-10-31
+
+### Changed
+
+- The README now documents the one-time caps setup for 9Router
+  users: 9Router reads a custom model's capabilities from the caps
+  saved on the model row, not from the provider's `/v1/models`, so
+  the guide ships a console snippet that declares them once per
+  model.
+
 ### Removed
 
 - The `capabilities` and `architecture` metadata on `/v1/models`
