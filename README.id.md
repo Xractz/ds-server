@@ -140,6 +140,39 @@ environment variable `DS_DEVICE_ID` untuk menetapkan nilai tertentu.
 Hanya dua nama model ini yang dilayani; nama model lain ditolak
 dengan error `model_not_found`.
 
+### Ikon kapabilitas di 9Router
+
+9Router tidak membaca metadata kapabilitas dari `/v1/models` milik
+provider. Untuk model kustom, yang dipakai adalah caps yang tersimpan
+di baris modelnya sendiri, jadi ikon dan capacity adapter hanya tahu
+apa yang dideklarasikan di situ. Deklarasikan sekali per model: saat
+sedang login ke dashboard 9Router, buka konsol browser dan jalankan
+cuplikan di bawah ini, dengan `NODE_ID` diganti id yang ada di URL
+halaman provider.
+
+```js
+const NODE_ID = "openai-compatible-chat-xxxxxxxx";
+const caps = {
+  "deepseek-chat": { vision: true, reasoning: false },
+  "deepseek-reasoner": { vision: true, reasoning: true },
+};
+for (const [id, c] of Object.entries(caps)) {
+  await fetch("/api/models/custom", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      key: `${NODE_ID}|${id}|llm`,
+      value: { id, providerAlias: NODE_ID, type: "llm", caps: c },
+    }),
+  });
+}
+```
+
+Setelah halaman dimuat ulang, `deepseek-chat` menampilkan ikon vision
+dan `deepseek-reasoner` menampilkan vision plus reasoning. Jalankan
+lagi cuplikan ini bila modelnya terhapus lalu diimpor ulang, karena
+impor baru menyimpan barisnya tanpa caps.
+
 ### Thinking dan search dikontrol dari payload
 
 Nama model hanya menentukan nilai bawaan. Parameter payload selalu

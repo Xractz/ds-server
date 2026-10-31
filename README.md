@@ -138,6 +138,38 @@ Set the `DS_DEVICE_ID` environment variable to pin a specific value.
 Only these two model names are served; any other model name is
 rejected with a `model_not_found` error.
 
+### Capability icons in 9Router
+
+9Router does not read capability metadata from a provider's
+`/v1/models`. For a custom model it uses the caps saved on the model
+row itself, so the icons and the capacity adapter only know what you
+declare there. Declare them once per model: while logged in to the
+9Router dashboard, open the browser console and run the snippet
+below, replacing `NODE_ID` with the id in the provider page URL.
+
+```js
+const NODE_ID = "openai-compatible-chat-xxxxxxxx";
+const caps = {
+  "deepseek-chat": { vision: true, reasoning: false },
+  "deepseek-reasoner": { vision: true, reasoning: true },
+};
+for (const [id, c] of Object.entries(caps)) {
+  await fetch("/api/models/custom", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      key: `${NODE_ID}|${id}|llm`,
+      value: { id, providerAlias: NODE_ID, type: "llm", caps: c },
+    }),
+  });
+}
+```
+
+After a refresh, `deepseek-chat` shows the vision icon and
+`deepseek-reasoner` shows vision plus reasoning. Re-run the snippet
+if the models are ever removed and imported again, because a fresh
+import stores the rows without caps.
+
 ### Thinking and search are payload-controlled
 
 The model name only sets the default. Payload parameters always win:
