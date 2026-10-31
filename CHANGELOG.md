@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Chain continuation now verifies the fingerprints of the whole
+  recorded prefix, not only the boundary message. Edits behind the
+  boundary (an edit, a rollback, a head-preserving compaction) went
+  undetected and the backend kept answering from the pre-edit
+  context; they now reset the chain like any other divergence.
+  Records written before this change reset once and are rewritten.
+- A completion whose final answer is completely empty (the backend
+  intermittently produces a session with no reply, observed under
+  the tool-catalog prompt) is retried once on a fresh session
+  instead of being returned as an empty success.
+- File upload business errors now carry the backend's `biz_msg`
+  (for example "rate limit reached") instead of an empty detail,
+  and a rate-limit business error is surfaced as HTTP 429 so
+  routers back off.
+- The DS_LOG chain label for a divergence on an existing chain now
+  reads `reset`, matching the behavior (it read `new` before).
+- The README now states that OpenAI sampling parameters
+  (temperature, max_tokens, stop, n) are accepted and ignored,
+  because the web backend has no equivalents.
+
 ## [1.2.1] - 2026-10-31
 
 ### Changed

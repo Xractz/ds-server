@@ -233,6 +233,10 @@ streaming matters more than canonical text.
   - Native web search via `search_enabled: true` in the request body
 - `POST /v1/sessions/new`: reset all session chains
 
+Parameters the web backend has no equivalent for (`temperature`,
+`max_tokens`, `stop`, `n`, and similar sampling controls) are
+accepted and ignored; the backend decides sampling and reply length.
+
 ## Configuration
 
 Every setting is an environment variable; the server reads the

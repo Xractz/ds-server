@@ -238,6 +238,10 @@ penting daripada teks kanonis.
   - Web search native melalui `search_enabled: true` di body request
 - `POST /v1/sessions/new`: reset semua chain sesi
 
+Parameter yang tidak punya padanan di backend web (`temperature`,
+`max_tokens`, `stop`, `n`, dan kontrol sampling sejenisnya) diterima
+dan diabaikan; backend yang menentukan sampling dan panjang balasan.
+
 ## Konfigurasi
 
 Semua pengaturan berupa environment variable; server membaca
