@@ -152,11 +152,15 @@ class EmptyRetryTest(unittest.TestCase):
         self.assertEqual(client.sessions, 2)
         self.assertEqual(status, "new")
 
-    def test_persistent_empty_gives_up_after_one_retry(self):
+    def test_persistent_empty_raises_502_after_one_retry(self):
+        # v1.2.4 contract (delta UAT F1): a still-empty answer after
+        # the retry surfaces as a retryable 502, not an empty return.
+        from deepseek_web.core import DSError
         client = FlakyClient(["", "", ""])
         service = CompletionService(FakeChains())
-        answer, _t, _s = service.run(client, make_request(), "k")
-        self.assertEqual(answer, "")
+        with self.assertRaises(DSError) as caught:
+            service.run(client, make_request(), "k")
+        self.assertEqual(caught.exception.status, 502)
         self.assertEqual(client.completions, 2)
 
     def test_non_empty_result_never_retries(self):
@@ -166,7 +170,10 @@ class EmptyRetryTest(unittest.TestCase):
         self.assertEqual(answer, "halo")
         self.assertEqual(client.completions, 1)
 
-    def test_empty_continuation_retries_and_reports_reset(self):
+    def test_empty_continuation_retries_and_keeps_hit_label(self):
+        # v1.2.4 contract (delta UAT F2): the empty-retry restarts
+        # the backend session but does not relabel the conversation
+        # outcome; a continuation stays a hit.
         record = {"ds_session": "s0", "parent": 3, "count": 1}
         chains = ContinuationChains(record)
         client = FlakyClient(["", "jawaban"])
@@ -177,7 +184,7 @@ class EmptyRetryTest(unittest.TestCase):
             {"model": "deepseek-chat", "messages": messages})
         answer, _t, status = service.run(client, request, "k")
         self.assertEqual(answer, "jawaban")
-        self.assertEqual(status, "reset")
+        self.assertEqual(status, "hit")
 
 
 @unittest.skipUnless(HAS_SERVER, "ds_server dependencies not installed")
