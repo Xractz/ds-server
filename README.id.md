@@ -234,7 +234,12 @@ penting daripada teks kanonis.
     (`auto` / `none` / `required` / fungsi tertentu) dan
     `parallel_tool_calls`. Field lama `functions` juga diterima.
   - Gambar melalui
-    `content: [{type: "image_url", image_url: {url: "data:..."}}]`
+    `content: [{type: "image_url", image_url: {url: "data:..."}}]`;
+    URL gambar http(s) jarak jauh diambil oleh server dan diunggah
+    dengan cara yang sama
+  - File melalui
+    `content: [{type: "file", file: {filename: "doc.pdf", file_data: "data:..."}}]`
+    (PDF, teks, dokumen office, dan apa pun yang diterima web chat)
   - Web search native melalui `search_enabled: true` di body request
 - `POST /v1/sessions/new`: reset semua chain sesi
 

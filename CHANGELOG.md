@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- File attachments: OpenAI `file` content parts (a base64 data URL
+  plus a filename) are uploaded to the web backend and attached to
+  the completion, so clients without a coding agent can send PDF,
+  text, and office documents the model then reads.
+- Remote image URLs: an `image_url` part pointing at an http(s)
+  URL is downloaded by the server (15 second timeout, 10 MB cap)
+  and uploaded like a data-URL image; an unreachable or oversized
+  image is skipped instead of failing the request.
+
 ## [1.2.2] - 2026-10-31
 
 ### Fixed

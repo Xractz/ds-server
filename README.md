@@ -229,7 +229,13 @@ streaming matters more than canonical text.
     `parallel_tool_calls`. The legacy `functions` field is also
     accepted.
   - Images via
-    `content: [{type: "image_url", image_url: {url: "data:..."}}]`
+    `content: [{type: "image_url", image_url: {url: "data:..."}}]`;
+    a remote http(s) image URL is fetched by the server and uploaded
+    the same way
+  - Files via
+    `content: [{type: "file", file: {filename: "doc.pdf", file_data: "data:..."}}]`
+    (PDF, text, office documents, and anything else the web chat
+    accepts)
   - Native web search via `search_enabled: true` in the request body
 - `POST /v1/sessions/new`: reset all session chains
 
