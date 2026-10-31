@@ -5,7 +5,7 @@ completions, proof of work) and adds prompt-based tool calling plus a
 session chain store for OpenAI-compatible clients. The REST server in
 ``ds_server.py`` is a thin entry point on top of this package.
 """
-__version__ = "1.2.3"
+__version__ = "1.2.4"
 
 from .core import (ChatResult, DeepSeekClient, DeviceIdentity, DSError,
                    PowSolver, RequestPacer, StreamCancelled, StreamParser,
