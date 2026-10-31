@@ -193,9 +193,34 @@ berperilaku seperti reasoner, dan `deepseek-reasoner` dengan
 backend web hanya berupa saklar on/off, sehingga setiap level effort
 di atas none dipetakan ke nyala.
 
+### Format respons
+
+`response_format` dihormati di level prompt. Kirim
+`{"type": "json_object"}` dan model diinstruksikan menjawab dengan
+satu objek JSON yang valid saja, tanpa teks lain. Kirim
+`{"type": "json_schema", "json_schema": {"schema": {...}}}` dan
+skemanya ikut terkirim bersama instruksinya. Backend web tidak bisa
+memaksa format saat decoding, jadi balasan yang tidak patuh pada
+prinsipnya mungkin terjadi; dalam praktiknya model web saat ini
+mengikuti instruksinya dengan andal. Menggabungkan `response_format`
+dengan tool calling tidak disarankan, karena kedua kontrak output
+itu saling berebut.
+
+### Mode history
+
+Dengan `history_mode: true` di body request (atau `DS_HISTORY_MODE=1`
+sebagai bawaan untuk semua request), jawaban resminya adalah balasan
+yang tersimpan di history backend, dibaca kembali setelah completion
+selesai, bukan teks yang dirangkai dari stream. Pakai mode ini kalau
+ketepatan rangkaian stream lebih penting daripada latensi: biayanya
+satu pengambilan history tambahan per request, dan request streaming
+ditampung dulu alih-alih dialirkan langsung, karena teks otoritatifnya
+baru diketahui di akhir.
+
 ## Endpoint
 
 - `GET /health`
+- `GET /stats`: penghitung completion sejak proses dimulai
 - `GET /v1/models`
 - `GET /v1/models/<id>`
 - `POST /v1/chat/completions`, format OpenAI penuh:
@@ -220,6 +245,11 @@ baru dengan render penuh. Percakapan yang berbeda (system prompt atau
 pesan pertama berbeda) menjadi chain yang berbeda dan tidak pernah
 tercampur. Chain tersimpan melewati restart di
 `~/.config/ds-server/sessions.json`.
+
+Set `DS_DELETE_SESSIONS=1` untuk menghapus sesi backend milik chain
+begitu chain-nya tergantikan atau terusir, supaya percakapan lama
+tidak menumpuk di daftar chat akun. Penghapusan bersifat best effort
+dan terjadi setelah request yang memensiunkan chain itu selesai.
 
 ## Pacing request dan retry
 
@@ -259,6 +289,12 @@ Set `DS_LOG=1` untuk mencatat satu baris per completion ke stderr:
 model, hasil chain (hit, new, atau reset), durasi, berapa retry
 upstream yang diperlukan, dan status akhir (ok, cancelled, atau status
 error). Mati secara bawaan.
+
+`GET /stats` menyajikan event yang sama sebagai penghitung: total
+menurut hasil (ok, cancelled, error), hasil chain, perkiraan total
+token, dan rincian per model dengan retry dan total durasi.
+Penghitungnya selalu menyala, hanya tersimpan di memori, dan reset
+saat restart.
 
 ## Tool calling
 
