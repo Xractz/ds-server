@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A completion that is still empty after the fresh-session retry
+  (the backend intermittently produces replies that never
+  materialize, and the empties cluster) is now surfaced as a
+  retryable 502 `upstream_error` instead of an empty 200, so
+  routers and agent loops retry at their own layer instead of
+  reading a completed, empty turn.
+- The empty-retry no longer relabels the chain outcome as `reset`
+  in DS_LOG and /stats; the label describes the conversation
+  (hit, new, or a genuine divergence reset), so divergence
+  counters stay truthful.
+- Search answers no longer leak `[citation:N]` markers; they are
+  stripped on every answer path, like the `[reference:N]` family.
+
 ## [1.2.3] - 2026-10-31
 
 ### Added
