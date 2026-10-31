@@ -343,6 +343,44 @@ class CompletionService:
                     file_ids.append(client.upload_file(data, filename))
         return file_ids
 
+    @staticmethod
+    def _resolve_answer(client, session_id, result, chat_request,
+                        on_token):
+        """Resolve the final answer text for one completed attempt.
+
+        The assembled stream text wins, except that an empty result
+        falls back to the stored history, and history mode makes the
+        stored history the answer of record either way.
+        """
+        answer = result.content
+        if not answer:
+            # The stored history is the authoritative record if stream
+            # parsing produced no text.
+            try:
+                answer = client.fetch_history_text(session_id)
+            except Exception:
+                pass
+            if answer and on_token is not None:
+                # Nothing was streamed, so a streaming client would
+                # otherwise see an empty reply: deliver the fallback
+                # text through the token callback as one content piece.
+                on_token(StreamParser.CONTENT, answer)
+        if chat_request.history_mode:
+            # Authoritative history mode: the stored history, not the
+            # assembled stream, is the answer of record. This costs
+            # one extra history fetch per request; it is the default
+            # for router and agent workloads, where stream assembly
+            # fidelity matters more than latency. Streaming requests
+            # are buffered by the caller in this mode, so the token
+            # callback never sees text the history would contradict.
+            try:
+                history = client.fetch_history_text(session_id)
+            except Exception:
+                history = ""
+            if history:
+                answer = history
+        return answer
+
     def run(self, client, chat_request, key, on_token=None,
             cancel_event=None):
         """Run one completion.
@@ -360,7 +398,8 @@ class CompletionService:
         record = chains.get(key)
         continuation = chains.is_continuation(record,
                                               chat_request.messages)
-        chain_status = "hit" if continuation else "new"
+        chain_status = "hit" if continuation else (
+            "reset" if record and record.get("count") else "new")
 
         if continuation:
             session_id = record["ds_session"]
@@ -403,39 +442,33 @@ class CompletionService:
                 on_token=on_token, cancel_event=cancel_event)
             chain_status = "reset"
 
-        answer = result.content
-        if not answer:
-            # The stored history is the authoritative record if stream
-            # parsing produced no text.
-            try:
-                answer = client.fetch_history_text(session_id)
-            except Exception:
-                pass
-            if answer and on_token is not None:
-                # Nothing was streamed, so a streaming client would
-                # otherwise see an empty reply: deliver the fallback
-                # text through the token callback as one content piece.
-                on_token(StreamParser.CONTENT, answer)
+        answer = self._resolve_answer(client, session_id, result,
+                                      chat_request, on_token)
 
-        if chat_request.history_mode:
-            # Authoritative history mode: the stored history, not the
-            # assembled stream, is the answer of record. This costs
-            # one extra history fetch per request; it is the default
-            # for router and agent workloads, where stream assembly
-            # fidelity matters more than latency. Streaming requests
-            # are buffered by the caller in this mode, so the token
-            # callback never sees text the history would contradict.
-            try:
-                history = client.fetch_history_text(session_id)
-            except Exception:
-                history = ""
-            if history:
-                answer = history
+        if not answer:
+            # The backend occasionally produces a session with no
+            # reply at all (observed under the tool-catalog prompt,
+            # with the stored history empty as well). An empty 200 is
+            # the worst possible answer for an agent loop, so retry
+            # once on a fresh session before returning it.
+            session_id, parent, prompt, sent_messages = \
+                self._start_fresh(client, key, chat_request, tools)
+            file_ids = self._upload_images(client, chat_request.messages)
+            result = client.chat_completion(
+                session_id, parent, prompt, file_ids,
+                thinking=chat_request.thinking, search=chat_request.search,
+                on_token=on_token, cancel_event=cancel_event)
+            answer = self._resolve_answer(client, session_id, result,
+                                          chat_request, on_token)
+            if continuation:
+                chain_status = "reset"
 
         chains.update(
             key, parent=result.response_id,
             count=len(chat_request.messages),
             last_fp=chains.fingerprint(chat_request.messages[-1]),
+            prefix=[chains.fingerprint(message)
+                    for message in chat_request.messages],
             input_tokens=estimate_tokens(prompt),
             output_tokens=estimate_tokens(answer))
 
