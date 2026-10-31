@@ -259,6 +259,14 @@ class ChatRequest:
         return os.environ.get(name, "").strip().lower() \
             in ("1", "true", "yes", "on")
 
+    @staticmethod
+    def _env_flag_unless_disabled(name):
+        """On unless the variable explicitly disables it, the same
+        convention as DS_PACING: ``0``, ``false``, ``no``, or ``off``
+        turns it off, and any other value (or none) leaves it on."""
+        return os.environ.get(name, "1").strip().lower() \
+            not in ("0", "false", "no", "off")
+
     @classmethod
     def resolve_history_mode(cls, body):
         """Whether the stored history is the authoritative answer.
@@ -514,7 +522,8 @@ def create_app():
     locks = ChainLocks()
     service = CompletionService(
         chains,
-        delete_sessions=ChatRequest._env_flag("DS_DELETE_SESSIONS"))
+        delete_sessions=ChatRequest._env_flag_unless_disabled(
+            "DS_DELETE_SESSIONS"))
     stats = ServerStats()
 
     def record_completion(model, chain, duration, retries, status,

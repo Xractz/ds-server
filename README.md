@@ -243,7 +243,7 @@ no variables set, the defaults below apply.
   (see History mode). One of `1`, `true`, `yes`, `on` enables it.
   Default: off.
 - `DS_DELETE_SESSIONS`: delete retired backend sessions (see
-  Sessions). Same enabling values. Default: off.
+  Sessions). Default: on; `0`, `false`, `no`, or `off` disables it.
 - `DS_LOG`: one log line per completion on stderr (see Streaming
   and logging). Same enabling values. Default: off.
 - `DS_PACING`: request pacing. Default: on; `0`, `false`, `no`, or
@@ -273,10 +273,12 @@ system prompt or first message) map to different chains and never mix.
 Chains persist across restarts in
 `~/.config/ds-server/sessions.json`.
 
-Set `DS_DELETE_SESSIONS=1` to delete a chain's backend session once
-the chain is replaced or evicted, so retired conversations do not pile
-up in the account's chat list. Deletion is best effort and happens
-after the request that retired the chain completes.
+A chain's backend session is deleted once the chain is replaced or
+evicted, so retired conversations do not pile up in the account's
+chat list. Deletion is best effort and happens after the request
+that retired the chain completes; it only ever touches sessions the
+server itself created. Set `DS_DELETE_SESSIONS=0` to keep retired
+sessions instead.
 
 ## Request pacing and retries
 

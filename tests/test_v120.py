@@ -1,6 +1,6 @@
 """Unit tests for the v1.2.0 minor package: response_format honored
-at prompt level, the opt-in authoritative history mode, opt-in
-upstream session auto-delete, the /stats endpoint, and coverage for
+at prompt level, the opt-in authoritative history mode, upstream
+session auto-delete, the /stats endpoint, and coverage for
 stream_options.include_usage (implemented earlier, previously
 untested).
 
@@ -202,6 +202,21 @@ class DeleteSessionTest(unittest.TestCase):
         service = CompletionService(chains)
         service.run(client, make_request({}), "key")
         self.assertEqual(client.deleted, [])
+
+
+@unittest.skipUnless(HAS_SERVER, "ds_server dependencies not installed")
+class EnvDefaultTest(unittest.TestCase):
+    def test_unless_disabled_defaults_on(self):
+        resolve = ChatRequest._env_flag_unless_disabled
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("DS_DELETE_SESSIONS", None)
+            self.assertTrue(resolve("DS_DELETE_SESSIONS"))
+        for value in ("0", "false", "no", "off"):
+            with mock.patch.dict(os.environ,
+                                 {"DS_DELETE_SESSIONS": value}):
+                self.assertFalse(resolve("DS_DELETE_SESSIONS"))
+        with mock.patch.dict(os.environ, {"DS_DELETE_SESSIONS": "1"}):
+            self.assertTrue(resolve("DS_DELETE_SESSIONS"))
 
 
 @unittest.skipUnless(HAS_SERVER, "ds_server dependencies not installed")

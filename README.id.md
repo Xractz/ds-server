@@ -248,7 +248,8 @@ berlaku.
   (lihat Mode history). Nilai `1`, `true`, `yes`, `on` yang
   menyalakannya. Bawaan: mati.
 - `DS_DELETE_SESSIONS`: hapus sesi backend yang pensiun (lihat
-  Sesi). Nilai penyala yang sama. Bawaan: mati.
+  Sesi). Bawaan: menyala; nilai `0`, `false`, `no`, atau `off` yang
+  mematikannya.
 - `DS_LOG`: satu baris log per completion di stderr (lihat
   Streaming dan logging). Nilai penyala yang sama. Bawaan: mati.
 - `DS_PACING`: pacing request. Bawaan: menyala; nilai `0`, `false`,
@@ -280,10 +281,12 @@ pesan pertama berbeda) menjadi chain yang berbeda dan tidak pernah
 tercampur. Chain tersimpan melewati restart di
 `~/.config/ds-server/sessions.json`.
 
-Set `DS_DELETE_SESSIONS=1` untuk menghapus sesi backend milik chain
-begitu chain-nya tergantikan atau terusir, supaya percakapan lama
-tidak menumpuk di daftar chat akun. Penghapusan bersifat best effort
-dan terjadi setelah request yang memensiunkan chain itu selesai.
+Sesi backend milik chain dihapus begitu chain-nya tergantikan atau
+terusir, supaya percakapan lama tidak menumpuk di daftar chat akun.
+Penghapusan bersifat best effort dan terjadi setelah request yang
+memensiunkan chain itu selesai; yang disentuh hanya sesi yang dibuat
+server itu sendiri. Set `DS_DELETE_SESSIONS=0` untuk mempertahankan
+sesi lama.
 
 ## Pacing request dan retry
 

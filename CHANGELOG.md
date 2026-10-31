@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Upstream session auto-delete is now on by default: a chain's
+  backend session is deleted once the chain is replaced or evicted.
+  Set `DS_DELETE_SESSIONS=0` to keep retired sessions. The feature
+  only ever touches sessions the server itself created.
+
 ## [1.2.0] - 2026-10-31
 
 ### Added
