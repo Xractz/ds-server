@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   backend session is deleted once the chain is replaced or evicted.
   Set `DS_DELETE_SESSIONS=0` to keep retired sessions. The feature
   only ever touches sessions the server itself created.
+- Authoritative history mode is now on by default (the per-request
+  `history_mode` flag and `DS_HISTORY_MODE=0` still turn it off).
+  The shipped defaults now follow the bridge's main deployment:
+  behind a router, serving agent workloads whose requests are
+  buffered anyway.
 
 ## [1.2.0] - 2026-10-31
 

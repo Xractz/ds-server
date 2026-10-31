@@ -203,14 +203,17 @@ recommended, because the two output contracts compete.
 
 ### History mode
 
-With `history_mode: true` in the request body (or `DS_HISTORY_MODE=1`
-as the default for every request), the answer of record is the reply
+History mode is on by default: the answer of record is the reply
 stored in the backend's history, read back after the completion
-instead of the text assembled from the stream. Use it when stream
-assembly fidelity matters more than latency: it costs one extra
-history fetch per request, and streamed requests are buffered rather
-than streamed live, because the authoritative text is only known at
-the end.
+instead of the text assembled from the stream. The shipped defaults
+are tuned for the deployment this bridge is built for, behind a
+router serving agent workloads: those requests are buffered anyway,
+so the mode costs one extra history fetch per request and streamed
+requests are replayed rather than streamed live, in exchange for
+the canonical text the web interface itself renders. Turn it off
+with `history_mode: false` in the request body, or
+`DS_HISTORY_MODE=0` for every request, when live token-by-token
+streaming matters more than canonical text.
 
 ## Endpoints
 
@@ -235,29 +238,43 @@ the end.
 Every setting is an environment variable; the server reads the
 process environment and loads no file by itself. The repository
 ships `.env.example` with the full list. Nothing is required: with
-no variables set, the defaults below apply.
+no variables set, the defaults below apply, and those defaults are
+tuned for the deployment this bridge is built for, behind a router
+such as 9Router serving agent workloads.
 
 - `DS_TOKEN`: fallback userToken for requests that present no API
-  key. Default: none, so a keyless request gets a 401.
+  key. Default: none, so a keyless request gets a 401. Behind a
+  router, leave it unset and let each client present its key per
+  request.
 - `DS_HISTORY_MODE`: authoritative history mode for every request
-  (see History mode). One of `1`, `true`, `yes`, `on` enables it.
-  Default: off.
+  (see History mode). Default: on, which suits router and agent
+  traffic; `0`, `false`, `no`, or `off` disables it.
 - `DS_DELETE_SESSIONS`: delete retired backend sessions (see
   Sessions). Default: on; `0`, `false`, `no`, or `off` disables it.
 - `DS_LOG`: one log line per completion on stderr (see Streaming
-  and logging). Same enabling values. Default: off.
+  and logging). Same enabling values. Default: off. Optional behind
+  a router: `/stats` usually covers observability without the log
+  noise.
 - `DS_PACING`: request pacing. Default: on; `0`, `false`, `no`, or
-  `off` disables it, and any other value leaves it on.
+  `off` disables it, and any other value leaves it on. Keep it on
+  behind a router: bursts of agent calls are exactly what it
+  smooths out.
 - `DS_MIN_COMPLETION_INTERVAL`: minimum seconds between completion
   starts. A non-numeric value falls back to the default. Default:
-  0.4.
+  0.4. The pacing floors are set for router throughput; the human
+  shape of the traffic comes from serialization and generation
+  time, not from imitating reading and typing pauses.
 - `DS_MIN_SESSION_INTERVAL`: minimum seconds between new session
   creations. Same fallback. Default: 1.0.
 - `DS_ADAPTIVE_PACING`: widen the pacing intervals after a retried
   429. Default: on; disabled by the same values as `DS_PACING`.
+  Recommended on: it is the account's pressure valve when the
+  backend starts pushing back.
 - `DS_DEVICE_ID`: device identifier presented to the backend.
   Default: the UUID stored in `~/.config/ds-server/device_id`,
-  generated randomly on first run and kept across restarts.
+  generated randomly on first run and kept across restarts. One
+  stable identity per install is also what a real browser profile
+  looks like.
 - `DS_DEBUG`: extra debug output for upstream failures. Any
   non-empty value enables it, including `0`. Default: off.
 

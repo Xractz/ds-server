@@ -144,11 +144,12 @@ class HistoryModeTest(unittest.TestCase):
             client, make_request({"history_mode": True}), "key")
         self.assertEqual(answer, "teks-history")
 
-    def test_stream_text_wins_by_default(self):
+    def test_stream_text_wins_when_disabled(self):
         client = FakeClient(content="teks-stream",
                             history="teks-history")
         service = CompletionService(FakeChains())
-        answer, _t, _s = service.run(client, make_request({}), "key")
+        answer, _t, _s = service.run(
+            client, make_request({"history_mode": False}), "key")
         self.assertEqual(answer, "teks-stream")
 
     def test_empty_history_falls_back_to_stream_text(self):
@@ -159,13 +160,17 @@ class HistoryModeTest(unittest.TestCase):
         self.assertEqual(answer, "teks-stream")
 
     def test_resolution_precedence(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("DS_HISTORY_MODE", None)
+            self.assertTrue(make_request({}).history_mode)
+        with mock.patch.dict(os.environ, {"DS_HISTORY_MODE": "0"}):
+            self.assertFalse(make_request({}).history_mode)
+            self.assertTrue(
+                make_request({"history_mode": True}).history_mode)
         with mock.patch.dict(os.environ, {"DS_HISTORY_MODE": "1"}):
             self.assertTrue(make_request({}).history_mode)
             self.assertFalse(
                 make_request({"history_mode": False}).history_mode)
-        with mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("DS_HISTORY_MODE", None)
-            self.assertFalse(make_request({}).history_mode)
 
 
 class DeleteSessionTest(unittest.TestCase):
@@ -293,7 +298,8 @@ class StatsTest(unittest.TestCase):
                 plain = client.post(
                     "/v1/chat/completions", headers=headers,
                     json={"model": "deepseek-chat",
-                          "messages": MESSAGES})
+                          "messages": MESSAGES,
+                          "history_mode": False})
                 self.assertEqual(plain.status_code, 200)
                 self.assertEqual(
                     plain.get_json()["choices"][0]["message"]["content"],

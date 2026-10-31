@@ -365,8 +365,12 @@ class HistoryFallbackStreamingTest(unittest.TestCase):
     """A stream that yields no tokens still delivers the fallback."""
 
     def make_request(self):
+        # This class tests the empty-answer fallback specifically, so
+        # history mode (on by default since the 9Router profile) is
+        # opted out of: the fallback must not consult the history when
+        # the stream produced an answer.
         return ChatRequest.from_body(
-            {"model": "deepseek-chat",
+            {"model": "deepseek-chat", "history_mode": False,
              "messages": [{"role": "user", "content": "halo"}]})
 
     def test_fallback_text_is_emitted_through_on_token(self):

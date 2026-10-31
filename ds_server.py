@@ -271,12 +271,15 @@ class ChatRequest:
     def resolve_history_mode(cls, body):
         """Whether the stored history is the authoritative answer.
 
-        Per-request ``history_mode`` wins; the ``DS_HISTORY_MODE``
-        environment variable supplies the default.
+        On by default: the defaults are tuned for the bridge's main
+        deployment behind a router serving agent workloads, whose
+        requests are buffered anyway. A per-request ``history_mode``
+        boolean wins over the environment, and
+        ``DS_HISTORY_MODE=0`` turns the default off.
         """
         if isinstance(body.get("history_mode"), bool):
             return body["history_mode"]
-        return cls._env_flag("DS_HISTORY_MODE")
+        return cls._env_flag_unless_disabled("DS_HISTORY_MODE")
 
     @staticmethod
     def resolve_response_format(body):
@@ -417,11 +420,11 @@ class CompletionService:
         if chat_request.history_mode:
             # Authoritative history mode: the stored history, not the
             # assembled stream, is the answer of record. This costs
-            # one extra history fetch per request and is opt-in for
-            # workloads where stream assembly fidelity matters more
-            # than latency. Streaming requests are buffered by the
-            # caller in this mode, so the token callback never sees
-            # text the history would contradict.
+            # one extra history fetch per request; it is the default
+            # for router and agent workloads, where stream assembly
+            # fidelity matters more than latency. Streaming requests
+            # are buffered by the caller in this mode, so the token
+            # callback never sees text the history would contradict.
             try:
                 history = client.fetch_history_text(session_id)
             except Exception:

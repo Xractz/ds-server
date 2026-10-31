@@ -208,14 +208,18 @@ itu saling berebut.
 
 ### Mode history
 
-Dengan `history_mode: true` di body request (atau `DS_HISTORY_MODE=1`
-sebagai bawaan untuk semua request), jawaban resminya adalah balasan
+Mode history menyala secara bawaan: jawaban resminya adalah balasan
 yang tersimpan di history backend, dibaca kembali setelah completion
-selesai, bukan teks yang dirangkai dari stream. Pakai mode ini kalau
-ketepatan rangkaian stream lebih penting daripada latensi: biayanya
-satu pengambilan history tambahan per request, dan request streaming
-ditampung dulu alih-alih dialirkan langsung, karena teks otoritatifnya
-baru diketahui di akhir.
+selesai, bukan teks yang dirangkai dari stream. Nilai bawaan yang
+dikirim memang disetel untuk deployment yang jadi tujuan bridge ini,
+di belakang router yang melayani beban kerja agent: request semacam
+itu memang sudah ditampung dulu, jadi mode ini biayanya satu
+pengambilan history tambahan per request dan request streaming
+diputar ulang alih-alih dialirkan live, ditukar dengan teks kanonis
+yang dirender web interface itu sendiri. Matikan dengan
+`history_mode: false` di body request, atau `DS_HISTORY_MODE=0`
+untuk semua request, kalau streaming live token demi token lebih
+penting daripada teks kanonis.
 
 ## Endpoint
 
@@ -240,32 +244,45 @@ Semua pengaturan berupa environment variable; server membaca
 environment proses dan tidak memuat file apa pun sendiri. Repo ini
 menyertakan `.env.example` dengan daftar lengkapnya. Tidak ada yang
 wajib diisi: tanpa variabel apa pun, nilai bawaan di bawah ini yang
-berlaku.
+berlaku, dan nilai bawaan itu disetel untuk deployment yang jadi
+tujuan bridge ini, di belakang router seperti 9Router yang melayani
+beban kerja agent.
 
 - `DS_TOKEN`: userToken cadangan untuk request yang tidak membawa
-  API key. Bawaan: tidak ada, jadi request tanpa key kena 401.
+  API key. Bawaan: tidak ada, jadi request tanpa key kena 401. Di
+  belakang router, biarkan kosong dan biar setiap klien membawa
+  key-nya sendiri per request.
 - `DS_HISTORY_MODE`: mode history otoritatif untuk semua request
-  (lihat Mode history). Nilai `1`, `true`, `yes`, `on` yang
-  menyalakannya. Bawaan: mati.
+  (lihat Mode history). Bawaan: menyala, cocok untuk traffic router
+  dan agent; nilai `0`, `false`, `no`, atau `off` yang
+  mematikannya.
 - `DS_DELETE_SESSIONS`: hapus sesi backend yang pensiun (lihat
   Sesi). Bawaan: menyala; nilai `0`, `false`, `no`, atau `off` yang
   mematikannya.
 - `DS_LOG`: satu baris log per completion di stderr (lihat
   Streaming dan logging). Nilai penyala yang sama. Bawaan: mati.
+  Opsional di belakang router: `/stats` biasanya cukup untuk
+  observabilitas tanpa keramaian log.
 - `DS_PACING`: pacing request. Bawaan: menyala; nilai `0`, `false`,
   `no`, atau `off` yang mematikannya, dan nilai lain apa pun
-  membiarkannya menyala.
+  membiarkannya menyala. Biarkan menyala di belakang router:
+  ledakan panggilan agent memang yang dia haluskan.
 - `DS_MIN_COMPLETION_INTERVAL`: detik minimum antar awal
   completion. Nilai bukan angka kembali ke bawaan. Bawaan: 0.4.
+  Lantai pacing ini disetel untuk throughput router; bentuk manusia
+  dari traffic-nya datang dari serialisasi dan waktu generasi,
+  bukan dari meniru jeda membaca dan mengetik.
 - `DS_MIN_SESSION_INTERVAL`: detik minimum antar pembuatan sesi
   baru. Fallback yang sama. Bawaan: 1.0.
 - `DS_ADAPTIVE_PACING`: lebarkan interval pacing setelah 429 yang
   di-retry. Bawaan: menyala; dimatikan oleh nilai yang sama seperti
-  `DS_PACING`.
+  `DS_PACING`. Disarankan menyala: dia katup tekanan akun saat
+  backend mulai menolak.
 - `DS_DEVICE_ID`: pengenal perangkat yang ditunjukkan ke backend.
   Bawaan: UUID yang tersimpan di `~/.config/ds-server/device_id`,
   dibuat acak saat pertama jalan dan dipertahankan melewati
-  restart.
+  restart. Satu identitas stabil per instalasi juga memang seperti
+  profil browser sungguhan.
 - `DS_DEBUG`: output debug tambahan untuk kegagalan upstream. Nilai
   tidak kosong apa pun menyalakannya, termasuk `0`. Bawaan: mati.
 
