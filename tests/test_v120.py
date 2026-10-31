@@ -18,8 +18,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from deepseek_web.core import ChatResult, DeepSeekClient
-from deepseek_web.sessions import ChainStore
+from deepseek_web.core import ChatResult, DeepSeekClientfrom deepseek_web.sessions import ChainStore
 from deepseek_web.tools import PromptBuilder
 
 try:
@@ -280,7 +279,7 @@ class StatsTest(unittest.TestCase):
         response = client.get("/stats")
         self.assertEqual(response.status_code, 200)
         body = response.get_json()
-        self.assertEqual(body["version"], "1.2.0")
+        self.assertEqual(body["version"], deepseek_web.__version__)
         self.assertEqual(body["totals"]["requests"], 0)
 
     def test_completions_feed_the_endpoint(self):
