@@ -271,6 +271,37 @@ TOOLS:
                     f"for \"{forced}\".]")
         return ""
 
+    @staticmethod
+    def _format_clause(response_format):
+        """Instruction derived from OpenAI ``response_format``.
+
+        The web backend cannot enforce an output format at decode
+        time, so the format is honored at prompt level: the model is
+        told to answer with a single JSON object, carrying the schema
+        when the client supplied one.
+        """
+        if not isinstance(response_format, dict):
+            return ""
+        format_type = response_format.get("type")
+        if format_type == "json_object":
+            return ("\n\n[IMPORTANT: Respond with a single valid JSON "
+                    "object only. No prose before or after it, no "
+                    "markdown fences.]")
+        if format_type == "json_schema":
+            clause = ("\n\n[IMPORTANT: Respond with a single valid JSON "
+                      "object only. No prose before or after it, no "
+                      "markdown fences.]")
+            spec = response_format.get("json_schema") or {}
+            schema = spec.get("schema")
+            if isinstance(schema, dict):
+                rendered = json.dumps(schema, ensure_ascii=False)
+                if len(rendered) > 4000:
+                    rendered = rendered[:4000] + "..."
+                clause += (" The JSON object must conform to this "
+                           f"JSON Schema: {rendered}")
+            return clause
+        return ""
+
     @classmethod
     def _suffix(cls, tools, tool_choice, parallel_tool_calls):
         suffix = cls._tool_choice_clause(tool_choice, tools)
@@ -281,7 +312,7 @@ TOOLS:
 
     @classmethod
     def full(cls, messages, tools, tool_choice=None,
-             parallel_tool_calls=True):
+             parallel_tool_calls=True, response_format=None):
         """Render the complete history; used for a new DeepSeek session."""
         system_texts, conversation = [], []
         for message in messages or []:
@@ -304,11 +335,12 @@ TOOLS:
         prompt = "\n\n".join(part for part in parts if part)
         if tools:
             prompt += cls._suffix(tools, tool_choice, parallel_tool_calls)
+        prompt += cls._format_clause(response_format)
         return prompt
 
     @classmethod
     def delta(cls, delta_messages, tools, tool_choice=None,
-              parallel_tool_calls=True):
+              parallel_tool_calls=True, response_format=None):
         """Render only the new messages of a continuing session, whose
         context the backend already holds."""
         parts = []
@@ -320,6 +352,7 @@ TOOLS:
         if tools:
             prompt += cls.REMINDER
             prompt += cls._suffix(tools, tool_choice, parallel_tool_calls)
+        prompt += cls._format_clause(response_format)
         return prompt
 
 

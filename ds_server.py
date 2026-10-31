@@ -117,6 +117,68 @@ class RequestLog:
               f"status={status}", file=sys.stderr, flush=True)
 
 
+class ServerStats:
+    """In-process completion counters, served by ``GET /stats``.
+
+    Always on, unlike the DS_LOG stderr lines: every completed,
+    cancelled, or failed completion is recorded with its model, chain
+    outcome, duration, retry count, and estimated token usage when
+    the caller computed it. Counters live in memory only and reset
+    when the process restarts; durations are stored as totals per
+    model so callers can derive averages.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._started = time.time()
+        self._totals = {"requests": 0, "ok": 0, "cancelled": 0,
+                        "errors": 0}
+        self._chains = {"hit": 0, "new": 0, "reset": 0}
+        self._tokens = {"prompt": 0, "completion": 0}
+        self._models = {}
+
+    def record(self, model, chain, duration, retries, status,
+               usage=None):
+        with self._lock:
+            self._totals["requests"] += 1
+            bucket = self._models.setdefault(model, {
+                "requests": 0, "ok": 0, "cancelled": 0, "errors": 0,
+                "retries": 0, "total_duration": 0.0,
+                "prompt_tokens": 0, "completion_tokens": 0})
+            bucket["requests"] += 1
+            if status == "ok":
+                self._totals["ok"] += 1
+                bucket["ok"] += 1
+            elif status == "cancelled":
+                self._totals["cancelled"] += 1
+                bucket["cancelled"] += 1
+            else:
+                self._totals["errors"] += 1
+                bucket["errors"] += 1
+            if chain in self._chains:
+                self._chains[chain] += 1
+            bucket["retries"] += retries
+            bucket["total_duration"] += duration
+            if usage:
+                prompt = usage.get("prompt_tokens", 0)
+                completion = usage.get("completion_tokens", 0)
+                bucket["prompt_tokens"] += prompt
+                bucket["completion_tokens"] += completion
+                self._tokens["prompt"] += prompt
+                self._tokens["completion"] += completion
+
+    def snapshot(self):
+        with self._lock:
+            return {
+                "uptime_seconds": round(time.time() - self._started, 1),
+                "totals": dict(self._totals),
+                "chains": dict(self._chains),
+                "tokens": dict(self._tokens),
+                "by_model": {model: dict(entry)
+                             for model, entry in self._models.items()},
+            }
+
+
 class ChainLocks:
     """One lock per session chain.
 
@@ -148,6 +210,8 @@ class ChatRequest:
     tools: list
     tool_choice: object
     parallel_tool_calls: bool
+    response_format: object = None
+    history_mode: bool = False
 
     @property
     def parse_tools(self):
@@ -190,6 +254,32 @@ class ChatRequest:
             return effort.strip().lower() not in ("none", "minimal", "off")
         return ChatRequest.is_reasoner_model(model)
 
+    @staticmethod
+    def _env_flag(name):
+        return os.environ.get(name, "").strip().lower() \
+            in ("1", "true", "yes", "on")
+
+    @classmethod
+    def resolve_history_mode(cls, body):
+        """Whether the stored history is the authoritative answer.
+
+        Per-request ``history_mode`` wins; the ``DS_HISTORY_MODE``
+        environment variable supplies the default.
+        """
+        if isinstance(body.get("history_mode"), bool):
+            return body["history_mode"]
+        return cls._env_flag("DS_HISTORY_MODE")
+
+    @staticmethod
+    def resolve_response_format(body):
+        """Keep only the response_format shapes this bridge honors."""
+        response_format = body.get("response_format")
+        if isinstance(response_format, dict) \
+                and response_format.get("type") \
+                in ("json_object", "json_schema"):
+            return response_format
+        return None
+
     @classmethod
     def from_body(cls, body):
         model = body.get("model") or "deepseek-chat"
@@ -210,6 +300,8 @@ class ChatRequest:
             tools=ToolCatalog.from_body(body),
             tool_choice=tool_choice,
             parallel_tool_calls=body.get("parallel_tool_calls", True),
+            response_format=cls.resolve_response_format(body),
+            history_mode=cls.resolve_history_mode(body),
         )
 
 
@@ -218,15 +310,17 @@ class CompletionService:
     store: continuing chains forward only the delta, new or diverged
     conversations start a fresh session with a full render."""
 
-    def __init__(self, chains):
+    def __init__(self, chains, delete_sessions=False):
         self._chains = chains
+        self._delete_sessions = delete_sessions
 
     def _start_fresh(self, client, key, chat_request, tools):
         session_id = client.create_session()
         self._chains.put(key, session_id, chat_request.model)
         prompt = PromptBuilder.full(chat_request.messages, tools,
                                     chat_request.tool_choice,
-                                    chat_request.parallel_tool_calls)
+                                    chat_request.parallel_tool_calls,
+                                    chat_request.response_format)
         return session_id, None, prompt, chat_request.messages
 
     @staticmethod
@@ -263,7 +357,8 @@ class CompletionService:
             delta = chat_request.messages[record["count"]:]
             prompt = PromptBuilder.delta(delta, tools,
                                          chat_request.tool_choice,
-                                         chat_request.parallel_tool_calls)
+                                         chat_request.parallel_tool_calls,
+                                         chat_request.response_format)
             sent_messages = delta
         else:
             session_id, parent, prompt, sent_messages = \
@@ -311,12 +406,38 @@ class CompletionService:
                 # text through the token callback as one content piece.
                 on_token(StreamParser.CONTENT, answer)
 
+        if chat_request.history_mode:
+            # Authoritative history mode: the stored history, not the
+            # assembled stream, is the answer of record. This costs
+            # one extra history fetch per request and is opt-in for
+            # workloads where stream assembly fidelity matters more
+            # than latency. Streaming requests are buffered by the
+            # caller in this mode, so the token callback never sees
+            # text the history would contradict.
+            try:
+                history = client.fetch_history_text(session_id)
+            except Exception:
+                history = ""
+            if history:
+                answer = history
+
         chains.update(
             key, parent=result.response_id,
             count=len(chat_request.messages),
             last_fp=chains.fingerprint(chat_request.messages[-1]),
             input_tokens=estimate_tokens(prompt),
             output_tokens=estimate_tokens(answer))
+
+        if self._delete_sessions:
+            # Best effort: a failed delete leaves the session listed
+            # on the account, nothing more. The current request's
+            # client is used, so a retired session belonging to a
+            # different account simply fails and is skipped.
+            for retired_id in chains.drain_retired():
+                try:
+                    client.delete_session(retired_id)
+                except Exception:
+                    pass
         return answer, result.thinking, chain_status
 
 
@@ -391,7 +512,16 @@ def create_app():
     app = Flask(__name__)
     chains = ChainStore()
     locks = ChainLocks()
-    service = CompletionService(chains)
+    service = CompletionService(
+        chains,
+        delete_sessions=ChatRequest._env_flag("DS_DELETE_SESSIONS"))
+    stats = ServerStats()
+
+    def record_completion(model, chain, duration, retries, status,
+                          usage=None):
+        """Feed both the /stats counters and the DS_LOG line."""
+        stats.record(model, chain, duration, retries, status, usage)
+        RequestLog.completion(model, chain, duration, retries, status)
 
     def authenticate():
         """Resolve the userToken presented as the request's API key."""
@@ -406,6 +536,12 @@ def create_app():
     @app.get("/health")
     def health():
         return jsonify({"ok": True, "version": __version__})
+
+    @app.get("/stats")
+    def stats_endpoint():
+        """Completion counters since process start (see ServerStats)."""
+        return jsonify({"ok": True, "version": __version__,
+                        **stats.snapshot()})
 
     @app.get("/v1/models")
     def list_models():
@@ -500,18 +636,18 @@ def create_app():
                     outcome["chain"] = chain_status
                     yield ResponseFactory._chunk(
                         completion_id, model, {}, "stop")
+                    prompt_tokens = estimate_tokens(
+                        PromptBuilder.full(chat_request.messages,
+                                           chat_request.tools))
+                    completion_tokens = estimate_tokens(answer)
+                    outcome["usage"] = {
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": prompt_tokens + completion_tokens}
                     if chat_request.include_usage:
-                        prompt_tokens = estimate_tokens(
-                            PromptBuilder.full(chat_request.messages,
-                                               chat_request.tools))
-                        completion_tokens = estimate_tokens(answer)
-                        usage = {
-                            "prompt_tokens": prompt_tokens,
-                            "completion_tokens": completion_tokens,
-                            "total_tokens": prompt_tokens
-                            + completion_tokens}
                         yield ResponseFactory._chunk(
-                            completion_id, model, {}, None, usage)
+                            completion_id, model, {}, None,
+                            outcome["usage"])
                 yield "data: [DONE]\n\n"
             finally:
                 # On a normal completion the worker has already
@@ -521,9 +657,10 @@ def create_app():
                 worker.join(timeout=10)
                 if outcome.get("cancelled"):
                     status = "cancelled"
-                RequestLog.completion(model, outcome.get("chain", "-"),
-                                      time.monotonic() - started,
-                                      client.retries, status)
+                record_completion(model, outcome.get("chain", "-"),
+                                  time.monotonic() - started,
+                                  client.retries, status,
+                                  outcome.get("usage"))
 
         return Response(generate(), mimetype="text/event-stream")
 
@@ -556,8 +693,11 @@ def create_app():
 
         # True streaming requires that no tool parsing is needed: tool
         # calls are parsed from the complete reply, so requests with
-        # tools keep the buffered path below.
-        if chat_request.stream and not chat_request.parse_tools:
+        # tools keep the buffered path below. History mode also stays
+        # buffered: the authoritative answer is only known once the
+        # stored history can be read back.
+        if chat_request.stream and not chat_request.parse_tools \
+                and not chat_request.history_mode:
             return _stream_response(client, chat_request, key, started)
 
         with locks.lock_for(key):
@@ -566,19 +706,25 @@ def create_app():
                     client, chat_request, key)
             except DSError as exc:
                 response, status = upstream_error_response(exc)
-                RequestLog.completion(
+                record_completion(
                     chat_request.model, "-", time.monotonic() - started,
                     client.retries, f"error-{status}")
                 return response, status
             except Exception as exc:
-                RequestLog.completion(
+                record_completion(
                     chat_request.model, "-", time.monotonic() - started,
                     client.retries, "error-500")
                 return error_response(f"internal: {exc}", 500,
                                       "internal_error")
-        RequestLog.completion(chat_request.model, chain_status,
-                              time.monotonic() - started, client.retries,
-                              "ok")
+        prompt_tokens = estimate_tokens(PromptBuilder.full(
+            chat_request.messages, chat_request.tools))
+        completion_tokens = estimate_tokens(full_text)
+        usage = {"prompt_tokens": prompt_tokens,
+                 "completion_tokens": completion_tokens,
+                 "total_tokens": prompt_tokens + completion_tokens}
+        record_completion(chat_request.model, chain_status,
+                          time.monotonic() - started, client.retries,
+                          "ok", usage)
 
         if chat_request.parse_tools:
             valid_names = {tool.name for tool in chat_request.tools}
@@ -587,12 +733,6 @@ def create_app():
             text, calls = full_text, []
         tool_calls = ToolCallParser.to_openai(calls) if calls else []
 
-        prompt_tokens = estimate_tokens(PromptBuilder.full(
-            chat_request.messages, chat_request.tools))
-        completion_tokens = estimate_tokens(full_text)
-        usage = {"prompt_tokens": prompt_tokens,
-                 "completion_tokens": completion_tokens,
-                 "total_tokens": prompt_tokens + completion_tokens}
         completion_id = "chatcmpl-" + uuid.uuid4().hex[:12]
         finish = "tool_calls" if tool_calls else "stop"
 
