@@ -31,6 +31,29 @@ official WebAssembly solver module (`sha3_wasm_bg.wasm`, bundled) and
 sends the complete Chrome header set, exactly like the real web
 client. Nothing about the proof of work is bypassed or forged.
 
+## How to get your userToken
+
+ds-server needs the `userToken` from your DeepSeek web session. The fastest way takes about 20 seconds and never displays the token on screen:
+
+<p align="center">
+  <img src="assets/get-usertoken.gif" width="720" alt="Getting your userToken from the browser console">
+</p>
+
+1. Open [chat.deepseek.com](https://chat.deepseek.com) in a desktop browser and sign in.
+2. Press **F12** to open DevTools, then click the **Console** tab.
+3. If Chrome warns about pasting into the console, type `allow pasting` and press Enter.
+4. Paste this line and press Enter:
+
+   ```js
+   copy(JSON.parse(localStorage.getItem('userToken')).value)
+   ```
+
+5. The token is now in your clipboard. Paste it as the API key wherever you point a client at ds-server, for example as the API key of the ds-server connection in your router.
+
+Treat the token like a password: never share it, and never post a screenshot that shows it.
+
+Prefer clicking over code? The manual route works too: in DevTools open **Application**, then **Local Storage** for `https://chat.deepseek.com`, select the `userToken` row, and copy its `value` field.
+
 ## Quick start
 
 Requirements: Python 3.10 or newer.
@@ -50,7 +73,7 @@ The server listens on `http://127.0.0.1:21787`. Use `--host` and
 Register it in your router or client as an OpenAI-compatible provider:
 
 - **Base URL:** `http://127.0.0.1:21787/v1`
-- **API key:** your DeepSeek userToken (see below)
+- **API key:** your DeepSeek userToken (see above)
 
 ### Note for LLM agents
 
@@ -75,29 +98,6 @@ and proceed only with my informed consent. Finally, run one small
 test chat completion and confirm a real reply before reporting that
 the setup works.
 ```
-
-## How to get your userToken
-
-ds-server needs the `userToken` from your DeepSeek web session. The fastest way takes about 20 seconds and never displays the token on screen:
-
-<p align="center">
-  <img src="assets/get-usertoken.gif" width="720" alt="Getting your userToken from the browser console">
-</p>
-
-1. Open [chat.deepseek.com](https://chat.deepseek.com) in a desktop browser and sign in.
-2. Press **F12** to open DevTools, then click the **Console** tab.
-3. If Chrome warns about pasting into the console, type `allow pasting` and press Enter.
-4. Paste this line and press Enter:
-
-   ```js
-   copy(JSON.parse(localStorage.getItem('userToken')).value)
-   ```
-
-5. The token is now in your clipboard. Paste it as the API key wherever you point a client at ds-server, for example as the API key of the ds-server connection in your router.
-
-Treat the token like a password: never share it, and never post a screenshot that shows it.
-
-Prefer clicking over code? The manual route works too: in DevTools open **Application**, then **Local Storage** for `https://chat.deepseek.com`, select the `userToken` row, and copy its `value` field.
 
 ## Authentication
 
@@ -125,6 +125,34 @@ random device identifier on first run and stores it in
 its own stable device, and no identifier is hardcoded in the source.
 Set the `DS_DEVICE_ID` environment variable to pin a specific value.
 
+## Endpoints
+
+- `GET /health`
+- `GET /stats`: completion counters since process start
+- `GET /v1/models`
+- `GET /v1/models/<id>`
+- `POST /v1/chat/completions`, full OpenAI format:
+  - `stream: true` (SSE, including `stream_options.include_usage`)
+  - Tool calling: send `tools` as usual and receive `tool_calls` with
+    `finish_reason: "tool_calls"`. Supports `tool_choice`
+    (`auto` / `none` / `required` / a specific function) and
+    `parallel_tool_calls`. The legacy `functions` field is also
+    accepted.
+  - Images via
+    `content: [{type: "image_url", image_url: {url: "data:..."}}]`;
+    a remote http(s) image URL is fetched by the server and uploaded
+    the same way
+  - Files via
+    `content: [{type: "file", file: {filename: "doc.pdf", file_data: "data:..."}}]`
+    (PDF, text, office documents, and anything else the web chat
+    accepts)
+  - Native web search via `search_enabled: true` in the request body
+- `POST /v1/sessions/new`: reset all session chains
+
+Parameters the web backend has no equivalent for (`temperature`,
+`max_tokens`, `stop`, `n`, and similar sampling controls) are
+accepted and ignored; the backend decides sampling and reply length.
+
 ## Models
 
 `GET /v1/models` advertises the two real engines:
@@ -137,38 +165,6 @@ Set the `DS_DEVICE_ID` environment variable to pin a specific value.
 
 Only these two model names are served; any other model name is
 rejected with a `model_not_found` error.
-
-### Capability icons in 9Router
-
-9Router does not read capability metadata from a provider's
-`/v1/models`. For a custom model it uses the caps saved on the model
-row itself, so the icons and the capacity adapter only know what you
-declare there. Declare them once per model: while logged in to the
-9Router dashboard, open the browser console and run the snippet
-below, replacing `NODE_ID` with the id in the provider page URL.
-
-```js
-const NODE_ID = "openai-compatible-chat-xxxxxxxx";
-const caps = {
-  "deepseek-chat": { vision: true, reasoning: false },
-  "deepseek-reasoner": { vision: true, reasoning: true },
-};
-for (const [id, c] of Object.entries(caps)) {
-  await fetch("/api/models/custom", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      key: `${NODE_ID}|${id}|llm`,
-      value: { id, providerAlias: NODE_ID, type: "llm", caps: c },
-    }),
-  });
-}
-```
-
-After a refresh, `deepseek-chat` shows the vision icon and
-`deepseek-reasoner` shows vision plus reasoning. Re-run the snippet
-if the models are ever removed and imported again, because a fresh
-import stores the rows without caps.
 
 ### Thinking and search are payload-controlled
 
@@ -201,48 +197,6 @@ principle; in practice the current web model follows the instruction
 reliably. Combining `response_format` with tool calling is not
 recommended, because the two output contracts compete.
 
-### History mode
-
-History mode is on by default: the answer of record is the reply
-stored in the backend's history, read back after the completion
-instead of the text assembled from the stream. The shipped defaults
-are tuned for the deployment this bridge is built for, behind a
-router serving agent workloads: those requests are buffered anyway,
-so the mode costs one extra history fetch per request and streamed
-requests are replayed rather than streamed live, in exchange for
-the canonical text the web interface itself renders. Turn it off
-with `history_mode: false` in the request body, or
-`DS_HISTORY_MODE=0` for every request, when live token-by-token
-streaming matters more than canonical text.
-
-## Endpoints
-
-- `GET /health`
-- `GET /stats`: completion counters since process start
-- `GET /v1/models`
-- `GET /v1/models/<id>`
-- `POST /v1/chat/completions`, full OpenAI format:
-  - `stream: true` (SSE, including `stream_options.include_usage`)
-  - Tool calling: send `tools` as usual and receive `tool_calls` with
-    `finish_reason: "tool_calls"`. Supports `tool_choice`
-    (`auto` / `none` / `required` / a specific function) and
-    `parallel_tool_calls`. The legacy `functions` field is also
-    accepted.
-  - Images via
-    `content: [{type: "image_url", image_url: {url: "data:..."}}]`;
-    a remote http(s) image URL is fetched by the server and uploaded
-    the same way
-  - Files via
-    `content: [{type: "file", file: {filename: "doc.pdf", file_data: "data:..."}}]`
-    (PDF, text, office documents, and anything else the web chat
-    accepts)
-  - Native web search via `search_enabled: true` in the request body
-- `POST /v1/sessions/new`: reset all session chains
-
-Parameters the web backend has no equivalent for (`temperature`,
-`max_tokens`, `stop`, `n`, and similar sampling controls) are
-accepted and ignored; the backend decides sampling and reply length.
-
 ## Configuration
 
 Every setting is an environment variable; the server reads the
@@ -257,7 +211,7 @@ such as 9Router serving agent workloads.
   router, leave it unset and let each client present its key per
   request.
 - `DS_HISTORY_MODE`: authoritative history mode for every request
-  (see History mode). Default: on, which suits router and agent
+  (see Sessions). Default: on, which suits router and agent
   traffic; `0`, `false`, `no`, or `off` disables it.
 - `DS_DELETE_SESSIONS`: delete retired backend sessions (see
   Sessions). Default: on; `0`, `false`, `no`, or `off` disables it.
@@ -265,10 +219,9 @@ such as 9Router serving agent workloads.
   and logging). Same enabling values. Default: off. Optional behind
   a router: `/stats` usually covers observability without the log
   noise.
-- `DS_PACING`: request pacing. Default: on; `0`, `false`, `no`, or
-  `off` disables it, and any other value leaves it on. Keep it on
-  behind a router: bursts of agent calls are exactly what it
-  smooths out.
+- `DS_PACING`: request pacing (see Request pacing and retries).
+  Default: on; `0`, `false`, `no`, or `off` disables it, and any
+  other value leaves it on.
 - `DS_MIN_COMPLETION_INTERVAL`: minimum seconds between completion
   starts. A non-numeric value falls back to the default. Default:
   0.4. The pacing floors are set for router throughput; the human
@@ -313,6 +266,19 @@ that retired the chain completes; it only ever touches sessions the
 server itself created. Set `DS_DELETE_SESSIONS=0` to keep retired
 sessions instead.
 
+### History mode
+
+History mode is on by default: the answer of record is the reply
+stored in the backend's history, read back after the completion
+instead of the text assembled from the stream. For the router and
+agent workloads this bridge is built for, requests are buffered
+anyway, so the mode costs one extra history fetch per request and
+streamed requests are replayed rather than streamed live, in
+exchange for the canonical text the web interface itself renders.
+Turn it off with `history_mode: false` in the request body, or
+`DS_HISTORY_MODE=0` for every request, when live token-by-token
+streaming matters more than canonical text.
+
 ## Request pacing and retries
 
 Upstream traffic is paced to stay close to normal web usage. Completions
@@ -323,9 +289,8 @@ failures (HTTP 429 and 5xx, connection errors, timeouts) are retried up
 to three times with exponential backoff (1s, 2s, 4s), honoring the
 `Retry-After` header when the backend sends one.
 
-The intervals can be tuned with the `DS_MIN_COMPLETION_INTERVAL` and
-`DS_MIN_SESSION_INTERVAL` environment variables (seconds), and pacing can
-be disabled entirely with `DS_PACING=0`. Disabling it is not recommended:
+The intervals are tunable (see Configuration), and pacing can be
+disabled entirely with `DS_PACING=0`, which is not recommended:
 bursts are the most visible signature of automation.
 
 The pacer also adapts on its own. Whenever the backend answers 429 and
@@ -365,6 +330,38 @@ parser also understands tag-style blocks and DeepSeek's native DSML
 markup, string-encoded arguments, and flattened arguments. The
 emulation is reliable in practice, but it is not as strict as native
 function calling on the paid API.
+
+## Capability icons in 9Router
+
+9Router does not read capability metadata from a provider's
+`/v1/models`. For a custom model it uses the caps saved on the model
+row itself, so the icons and the capacity adapter only know what you
+declare there. Declare them once per model: while logged in to the
+9Router dashboard, open the browser console and run the snippet
+below, replacing `NODE_ID` with the id in the provider page URL.
+
+```js
+const NODE_ID = "openai-compatible-chat-xxxxxxxx";
+const caps = {
+  "deepseek-chat": { vision: true, reasoning: false },
+  "deepseek-reasoner": { vision: true, reasoning: true },
+};
+for (const [id, c] of Object.entries(caps)) {
+  await fetch("/api/models/custom", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      key: `${NODE_ID}|${id}|llm`,
+      value: { id, providerAlias: NODE_ID, type: "llm", caps: c },
+    }),
+  });
+}
+```
+
+After a refresh, `deepseek-chat` shows the vision icon and
+`deepseek-reasoner` shows vision plus reasoning. Re-run the snippet
+if the models are ever removed and imported again, because a fresh
+import stores the rows without caps.
 
 ## Disclaimer
 

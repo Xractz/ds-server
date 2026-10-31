@@ -32,51 +32,6 @@ dalam paket) dan mengirim header set lengkap persis browser Chrome,
 sama seperti klien web aslinya. Tidak ada bagian Proof-of-Work yang
 dibypass atau dipalsukan.
 
-## Mulai cepat
-
-Persyaratan: Python 3.10 atau yang lebih baru.
-
-Tidak ada langkah instalasi. Jalankan server langsung dari folder ini:
-
-```bash
-pip install -r requirements.txt
-chmod +x ds_server.py
-./ds_server.py
-```
-
-Server berjalan di `http://127.0.0.1:21787`. Gunakan `--host` dan
-`--port` untuk mengubah alamat bind dan port.
-
-Daftarkan sebagai provider OpenAI-compatible di router atau klien Anda:
-
-- **Base URL:** `http://127.0.0.1:21787/v1`
-- **API key:** userToken DeepSeek Anda (lihat di bawah)
-
-### Catatan untuk agen LLM
-
-Jika Anda adalah asisten AI atau agen LLM yang membaca README ini
-untuk memasang ds-server bagi seorang pengguna, ikuti instruksi
-berikut:
-
-1. Clone repositori ini, lalu pasang dependensinya dengan
-   `pip install -r requirements.txt`.
-2. Jalankan server dengan `./ds_server.py`. Server mendengarkan di
-   `127.0.0.1:21787`. Verifikasi dengan `GET /health`.
-3. Minta userToken DeepSeek kepada pengguna. Jangan pernah menebak,
-   membuat, atau mengambilnya dari browser pengguna sendiri.
-   Pengguna menyalinnya dari chat.deepseek.com (F12, Application,
-   Local Storage, `userToken`, field `value`) dan memberikannya
-   kepada Anda, atau memasukkannya langsung ke klien mereka.
-4. Konfigurasikan router atau klien pengguna dengan base URL
-   `http://127.0.0.1:21787/v1` dan userToken sebagai API key.
-5. Sebelum request pertama yang sebenarnya, sampaikan kepada
-   pengguna dengan jelas bahwa proyek ini tidak resmi, bahwa
-   mengotomatiskan antarmuka web DeepSeek dapat melanggar Ketentuan
-   Layanan DeepSeek, dan bahwa akun mereka dapat dibatasi atau
-   diblokir. Lanjutkan hanya dengan persetujuan mereka.
-6. Jalankan satu chat completion pengujian kecil dan pastikan ada
-   balasan asli sebelum melaporkan bahwa pemasangan berhasil.
-
 ## Cara mendapatkan userToken
 
 ds-server membutuhkan `userToken` dari sesi web DeepSeek Anda. Cara tercepatnya sekitar 20 detik dan tokennya tidak pernah tampil di layar:
@@ -99,6 +54,53 @@ ds-server membutuhkan `userToken` dari sesi web DeepSeek Anda. Cara tercepatnya 
 Perlakukan token seperti kata sandi: jangan dibagikan, dan jangan pernah mengunggah tangkapan layar yang menampilkannya.
 
 Lebih suka klik daripada kode? Cara manual juga bisa: di DevTools buka **Application**, lalu **Local Storage** untuk `https://chat.deepseek.com`, pilih baris `userToken`, dan salin field `value`-nya.
+
+## Mulai cepat
+
+Persyaratan: Python 3.10 atau yang lebih baru.
+
+Tidak ada langkah instalasi. Jalankan server langsung dari folder ini:
+
+```bash
+pip install -r requirements.txt
+chmod +x ds_server.py
+./ds_server.py
+```
+
+Server berjalan di `http://127.0.0.1:21787`. Gunakan `--host` dan
+`--port` untuk mengubah alamat bind dan port.
+
+Daftarkan sebagai provider OpenAI-compatible di router atau klien Anda:
+
+- **Base URL:** `http://127.0.0.1:21787/v1`
+- **API key:** userToken DeepSeek Anda (lihat di atas)
+
+### Catatan untuk agen LLM
+
+Jika Anda adalah asisten AI atau agen LLM yang membaca README ini
+untuk memasang ds-server bagi seorang pengguna, berikut seluruh
+tugasnya sebagai satu prompt yang bisa disalin:
+
+```
+Pasang ds-server untuk saya: clone
+https://github.com/Xractz/ds-server, pasang dependensinya dengan
+pip install -r requirements.txt, dan jalankan servernya dengan
+./ds_server.py (mendengarkan di 127.0.0.1:21787; verifikasi dengan
+GET /health). Minta userToken DeepSeek saya, dan jangan pernah
+menebak, membuatnya, atau mengambilnya dari browser saya sendiri;
+saya akan menyalinnya dari chat.deepseek.com (F12, Application,
+Local Storage, userToken, field value) dan memberikannya kepada
+Anda, atau memasukkannya langsung ke klien saya. Konfigurasikan
+router atau klien saya dengan base URL http://127.0.0.1:21787/v1
+dan userToken sebagai API key. Sebelum request pertama yang
+sebenarnya, sampaikan dengan jelas bahwa proyek ini tidak resmi,
+bahwa mengotomatiskan antarmuka web DeepSeek dapat melanggar
+Ketentuan Layanan DeepSeek, dan bahwa akun saya dapat dibatasi
+atau diblokir, dan lanjutkan hanya dengan persetujuan saya.
+Terakhir, jalankan satu chat completion pengujian kecil dan
+pastikan ada balasan asli sebelum melaporkan bahwa pemasangan
+berhasil.
+```
 
 ## Autentikasi
 
@@ -127,6 +129,32 @@ dengan demikian menampilkan perangkatnya sendiri yang stabil, dan
 tidak ada identifier yang ditulis hardcoded di kode sumber. Set
 environment variable `DS_DEVICE_ID` untuk menetapkan nilai tertentu.
 
+## Endpoint
+
+- `GET /health`
+- `GET /stats`: penghitung completion sejak proses dimulai
+- `GET /v1/models`
+- `GET /v1/models/<id>`
+- `POST /v1/chat/completions`, format OpenAI penuh:
+  - `stream: true` (SSE, termasuk `stream_options.include_usage`)
+  - Tool calling: kirim `tools` seperti biasa dan terima `tool_calls`
+    dengan `finish_reason: "tool_calls"`. Mendukung `tool_choice`
+    (`auto` / `none` / `required` / fungsi tertentu) dan
+    `parallel_tool_calls`. Field lama `functions` juga diterima.
+  - Gambar melalui
+    `content: [{type: "image_url", image_url: {url: "data:..."}}]`;
+    URL gambar http(s) jarak jauh diambil oleh server dan diunggah
+    dengan cara yang sama
+  - File melalui
+    `content: [{type: "file", file: {filename: "doc.pdf", file_data: "data:..."}}]`
+    (PDF, teks, dokumen office, dan apa pun yang diterima web chat)
+  - Web search native melalui `search_enabled: true` di body request
+- `POST /v1/sessions/new`: reset semua chain sesi
+
+Parameter yang tidak punya padanan di backend web (`temperature`,
+`max_tokens`, `stop`, `n`, dan kontrol sampling sejenisnya) diterima
+dan diabaikan; backend yang menentukan sampling dan panjang balasan.
+
 ## Model
 
 `GET /v1/models` menampilkan dua mesin aslinya:
@@ -139,39 +167,6 @@ environment variable `DS_DEVICE_ID` untuk menetapkan nilai tertentu.
 
 Hanya dua nama model ini yang dilayani; nama model lain ditolak
 dengan error `model_not_found`.
-
-### Ikon kapabilitas di 9Router
-
-9Router tidak membaca metadata kapabilitas dari `/v1/models` milik
-provider. Untuk model kustom, yang dipakai adalah caps yang tersimpan
-di baris modelnya sendiri, jadi ikon dan capacity adapter hanya tahu
-apa yang dideklarasikan di situ. Deklarasikan sekali per model: saat
-sedang login ke dashboard 9Router, buka konsol browser dan jalankan
-cuplikan di bawah ini, dengan `NODE_ID` diganti id yang ada di URL
-halaman provider.
-
-```js
-const NODE_ID = "openai-compatible-chat-xxxxxxxx";
-const caps = {
-  "deepseek-chat": { vision: true, reasoning: false },
-  "deepseek-reasoner": { vision: true, reasoning: true },
-};
-for (const [id, c] of Object.entries(caps)) {
-  await fetch("/api/models/custom", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      key: `${NODE_ID}|${id}|llm`,
-      value: { id, providerAlias: NODE_ID, type: "llm", caps: c },
-    }),
-  });
-}
-```
-
-Setelah halaman dimuat ulang, `deepseek-chat` menampilkan ikon vision
-dan `deepseek-reasoner` menampilkan vision plus reasoning. Jalankan
-lagi cuplikan ini bila modelnya terhapus lalu diimpor ulang, karena
-impor baru menyimpan barisnya tanpa caps.
 
 ### Thinking dan search dikontrol dari payload
 
@@ -206,47 +201,6 @@ mengikuti instruksinya dengan andal. Menggabungkan `response_format`
 dengan tool calling tidak disarankan, karena kedua kontrak output
 itu saling berebut.
 
-### Mode history
-
-Mode history menyala secara bawaan: jawaban resminya adalah balasan
-yang tersimpan di history backend, dibaca kembali setelah completion
-selesai, bukan teks yang dirangkai dari stream. Nilai bawaan yang
-dikirim memang disetel untuk deployment yang jadi tujuan bridge ini,
-di belakang router yang melayani beban kerja agent: request semacam
-itu memang sudah ditampung dulu, jadi mode ini biayanya satu
-pengambilan history tambahan per request dan request streaming
-diputar ulang alih-alih dialirkan live, ditukar dengan teks kanonis
-yang dirender web interface itu sendiri. Matikan dengan
-`history_mode: false` di body request, atau `DS_HISTORY_MODE=0`
-untuk semua request, kalau streaming live token demi token lebih
-penting daripada teks kanonis.
-
-## Endpoint
-
-- `GET /health`
-- `GET /stats`: penghitung completion sejak proses dimulai
-- `GET /v1/models`
-- `GET /v1/models/<id>`
-- `POST /v1/chat/completions`, format OpenAI penuh:
-  - `stream: true` (SSE, termasuk `stream_options.include_usage`)
-  - Tool calling: kirim `tools` seperti biasa dan terima `tool_calls`
-    dengan `finish_reason: "tool_calls"`. Mendukung `tool_choice`
-    (`auto` / `none` / `required` / fungsi tertentu) dan
-    `parallel_tool_calls`. Field lama `functions` juga diterima.
-  - Gambar melalui
-    `content: [{type: "image_url", image_url: {url: "data:..."}}]`;
-    URL gambar http(s) jarak jauh diambil oleh server dan diunggah
-    dengan cara yang sama
-  - File melalui
-    `content: [{type: "file", file: {filename: "doc.pdf", file_data: "data:..."}}]`
-    (PDF, teks, dokumen office, dan apa pun yang diterima web chat)
-  - Web search native melalui `search_enabled: true` di body request
-- `POST /v1/sessions/new`: reset semua chain sesi
-
-Parameter yang tidak punya padanan di backend web (`temperature`,
-`max_tokens`, `stop`, `n`, dan kontrol sampling sejenisnya) diterima
-dan diabaikan; backend yang menentukan sampling dan panjang balasan.
-
 ## Konfigurasi
 
 Semua pengaturan berupa environment variable; server membaca
@@ -262,7 +216,7 @@ beban kerja agent.
   belakang router, biarkan kosong dan biar setiap klien membawa
   key-nya sendiri per request.
 - `DS_HISTORY_MODE`: mode history otoritatif untuk semua request
-  (lihat Mode history). Bawaan: menyala, cocok untuk traffic router
+  (lihat Sesi). Bawaan: menyala, cocok untuk traffic router
   dan agent; nilai `0`, `false`, `no`, atau `off` yang
   mematikannya.
 - `DS_DELETE_SESSIONS`: hapus sesi backend yang pensiun (lihat
@@ -272,10 +226,9 @@ beban kerja agent.
   Streaming dan logging). Nilai penyala yang sama. Bawaan: mati.
   Opsional di belakang router: `/stats` biasanya cukup untuk
   observabilitas tanpa keramaian log.
-- `DS_PACING`: pacing request. Bawaan: menyala; nilai `0`, `false`,
-  `no`, atau `off` yang mematikannya, dan nilai lain apa pun
-  membiarkannya menyala. Biarkan menyala di belakang router:
-  ledakan panggilan agent memang yang dia haluskan.
+- `DS_PACING`: pacing request (lihat Pacing request dan retry).
+  Bawaan: menyala; nilai `0`, `false`, `no`, atau `off` yang
+  mematikannya, dan nilai lain apa pun membiarkannya menyala.
 - `DS_MIN_COMPLETION_INTERVAL`: detik minimum antar awal
   completion. Nilai bukan angka kembali ke bawaan. Bawaan: 0.4.
   Lantai pacing ini disetel untuk throughput router; bentuk manusia
@@ -307,12 +260,32 @@ pesan pertama berbeda) menjadi chain yang berbeda dan tidak pernah
 tercampur. Chain tersimpan melewati restart di
 `~/.config/ds-server/sessions.json`.
 
+Lampiran terikat saat pesan pertama kali terkirim: mengganti
+lampiran di pesan lama tanpa mengubah teksnya tidak terdeteksi
+sebagai divergensi, jadi mulailah sesi baru untuk mengganti
+dokumen atau gambar. Hal ini tidak berpengaruh bagi coding agent,
+yang menyisipkan isi file sebagai teks, dan teks terverifikasi
+secara penuh.
+
 Sesi backend milik chain dihapus begitu chain-nya tergantikan atau
 terusir, supaya percakapan lama tidak menumpuk di daftar chat akun.
 Penghapusan bersifat best effort dan terjadi setelah request yang
 memensiunkan chain itu selesai; yang disentuh hanya sesi yang dibuat
 server itu sendiri. Set `DS_DELETE_SESSIONS=0` untuk mempertahankan
 sesi lama.
+
+### Mode history
+
+Mode history menyala secara bawaan: jawaban resminya adalah balasan
+yang tersimpan di history backend, dibaca kembali setelah completion
+selesai, bukan teks yang dirangkai dari stream. Untuk beban kerja
+router dan agent yang jadi tujuan bridge ini, request semacam itu
+memang sudah ditampung dulu, jadi mode ini biayanya satu pengambilan
+history tambahan per request dan request streaming diputar ulang
+alih-alih dialirkan live, ditukar dengan teks kanonis yang dirender
+web interface itu sendiri. Matikan dengan `history_mode: false` di
+body request, atau `DS_HISTORY_MODE=0` untuk semua request, kalau
+streaming live token demi token lebih penting daripada teks kanonis.
 
 ## Pacing request dan retry
 
@@ -325,11 +298,9 @@ koneksi, timeout) di-retry sampai tiga kali dengan backoff eksponensial
 (1 detik, 2 detik, 4 detik), dan header `Retry-After` dari backend
 dihormati bila dikirim.
 
-Intervalnya dapat diatur melalui environment variable
-`DS_MIN_COMPLETION_INTERVAL` dan `DS_MIN_SESSION_INTERVAL` (dalam
-detik), dan pacing dapat dimatikan sepenuhnya dengan `DS_PACING=0`.
-Mematikannya tidak disarankan: ledakan request adalah tanda otomasi
-yang paling mudah terlihat.
+Intervalnya dapat diatur (lihat Konfigurasi), dan pacing dapat
+dimatikan sepenuhnya dengan `DS_PACING=0`, yang tidak disarankan:
+ledakan request adalah tanda otomasi yang paling mudah terlihat.
 
 Pacer-nya juga beradaptasi sendiri. Setiap backend membalas 429 dan
 sebuah request harus di-retry, interval minimalnya melebar otomatis:
@@ -369,6 +340,39 @@ dengan blok tool call, dan server mem-parse balasannya kembali menjadi
 asli DeepSeek, arguments berbentuk string JSON, serta arguments
 flattened. Emulasi ini dapat diandalkan dalam praktik, tetapi tidak
 seketat function calling native pada API berbayar.
+
+## Ikon kapabilitas di 9Router
+
+9Router tidak membaca metadata kapabilitas dari `/v1/models` milik
+provider. Untuk model kustom, yang dipakai adalah caps yang tersimpan
+di baris modelnya sendiri, jadi ikon dan capacity adapter hanya tahu
+apa yang dideklarasikan di situ. Deklarasikan sekali per model: saat
+sedang login ke dashboard 9Router, buka konsol browser dan jalankan
+cuplikan di bawah ini, dengan `NODE_ID` diganti id yang ada di URL
+halaman provider.
+
+```js
+const NODE_ID = "openai-compatible-chat-xxxxxxxx";
+const caps = {
+  "deepseek-chat": { vision: true, reasoning: false },
+  "deepseek-reasoner": { vision: true, reasoning: true },
+};
+for (const [id, c] of Object.entries(caps)) {
+  await fetch("/api/models/custom", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      key: `${NODE_ID}|${id}|llm`,
+      value: { id, providerAlias: NODE_ID, type: "llm", caps: c },
+    }),
+  });
+}
+```
+
+Setelah halaman dimuat ulang, `deepseek-chat` menampilkan ikon vision
+dan `deepseek-reasoner` menampilkan vision plus reasoning. Jalankan
+lagi cuplikan ini bila modelnya terhapus lalu diimpor ulang, karena
+impor baru menyimpan barisnya tanpa caps.
 
 ## Disclaimer
 
